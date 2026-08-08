@@ -1,7 +1,7 @@
 # Samsung Galaxy Book 12 ALC298 Linux audio
 
-Linux audio support for the 2017 Samsung Galaxy Book 12 (SM-W720) with the
-Realtek ALC298 codec.
+Linux audio support for the 2017 Samsung Galaxy Book 12 (SM-W720/SM-W727) with
+the Realtek ALC298 codec.
 
 The machine is identified by:
 
@@ -33,9 +33,15 @@ Tested environment:
 - ALC298 subsystem `144d:c14f`;
 - CachyOS with Linux `7.1.6-1-cachyos`.
 
-This repository contains the guarded, known-working userspace implementation.
-A native ALSA HDA quirk is planned as a separate follow-up project after this
-workaround has passed reboot and suspend/resume testing.
+This repository contains the guarded, known-working userspace implementation
+and an experimental native ALSA HDA quirk. The native work lives under
+[`kernel/`](kernel/README.md) and is kept separate from the default installer
+until its jack switching has passed hardware testing.
+
+The native quirk matches audio subsystem `144d:c14f`, not a regional product
+suffix. It is intended to cover Wi-Fi and LTE Galaxy Book 12 variants with the
+same audio hardware. Known SM-W720 and SM-W727 sales codes are listed in the
+native-driver documentation.
 
 ## Userspace installation
 
