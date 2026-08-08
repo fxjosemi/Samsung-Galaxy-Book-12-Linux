@@ -30,11 +30,14 @@ to `sound/hda/codecs/realtek/alc269.c`. It:
 - mirrors the front stream to headphone DAC `0x03` and switches pin `0x17`
   from speaker mixer `0x0c` to headphone mixer `0x0d`;
 - keeps the DAC `0x02` and DAC `0x03` hardware volume values synchronized;
+- disables pin `0x17` and EAPD whenever the analog PCM is closed, then restores
+  them only while playback is open;
 - reapplies initialization and the current route after codec resume.
 
 During route changes the shared pin is muted and temporarily disabled before
-its connection selector and pin mode change. This sequencing is intended to
-reduce the insertion transient without adding a userspace delay.
+its connection selector and pin mode change. When PipeWire suspends the sink,
+the jack output remains electrically disabled. This sequencing is intended to
+remove the insertion transient without adding a userspace delay.
 
 ## Build result on the test tablet
 
@@ -43,7 +46,12 @@ automatically and produced Windows-like audio, but retained a strong insertion
 click and extremely faint left-to-right crosstalk because it still used speaker
 DAC `0x02` and mixer `0x0c` for the jack.
 
-The current dedicated-DAC revision has been compiled against Linux
+The dedicated-DAC revision removed the crosstalk and otherwise worked
+correctly, but the insertion click remained because pin `0x17` and EAPD stayed
+enabled while ALSA reported the PCM as closed and PipeWire reported the sink as
+suspended.
+
+The current idle-power revision has been compiled against Linux
 `7.1.6-1-cachyos` with Clang 22 and `W=1`; its module has matching vermagic. It
 still requires a reboot and live hardware test.
 
