@@ -64,6 +64,20 @@ sudo ./brightness/install.sh
 
 The equivalent top-level command is `sudo ./install.sh brightness`.
 
+An experimental native `i915` implementation is also included. It reads the
+same factory calibration inside the driver, exposes levels 10–101 directly and
+does not use a service or fade:
+
+```bash
+./brightness/kernel/build-module.sh
+sudo ./brightness/kernel/install-native.sh \
+  "brightness/kernel/build/$(uname -r)/i915.ko"
+sudo reboot
+```
+
+Keep another kernel installed while testing the native graphics module. Its
+installer preserves the distribution driver and provides a rollback script.
+
 More details and manual testing commands are in
 [brightness/README.md](brightness/README.md).
 

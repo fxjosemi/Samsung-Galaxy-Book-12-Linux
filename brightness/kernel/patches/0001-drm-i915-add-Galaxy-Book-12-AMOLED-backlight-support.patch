@@ -1,0 +1,1814 @@
+From d9b1a657f8f8e85313da3d36444abd1cbb3f3878 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jos=C3=A9=20Miguel=20Calder=C3=B3n=20de=20la=20Barca?=
+ <83497667+fxjosemi@users.noreply.github.com>
+Date: Sat, 8 Aug 2026 05:54:49 +0200
+Subject: [PATCH] drm/i915: add Galaxy Book 12 AMOLED backlight support
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Use the panel private AUX protocol and its factory calibration data to
+expose native brightness control on the Galaxy Book 12 AMOLED panel.
+Restrict the quirk to matching Samsung DMI and panel IDs, and retain
+PWM as a safe fallback.
+
+Signed-off-by: José Miguel Calderón de la Barca <83497667+fxjosemi@users.noreply.github.com>
+---
+ Makefile                                 |    1 +
+ display/intel_backlight.c                |    6 +
+ display/intel_display_types.h            |    3 +
+ display/intel_dp_samsung_amoled.c        |  619 +++++++++++++
+ display/intel_dp_samsung_amoled.h        |   11 +
+ display/intel_dp_samsung_amoled_tables.h | 1072 ++++++++++++++++++++++
+ 6 files changed, 1712 insertions(+)
+ create mode 100644 display/intel_dp_samsung_amoled.c
+ create mode 100644 display/intel_dp_samsung_amoled.h
+ create mode 100644 display/intel_dp_samsung_amoled_tables.h
+
+diff --git a/drivers/gpu/drm/i915/Makefile b/drivers/gpu/drm/i915/Makefile
+index b677720..5ebca07 100644
+--- a/drivers/gpu/drm/i915/Makefile
++++ b/drivers/gpu/drm/i915/Makefile
+@@ -354,6 +354,7 @@ i915-y += \
+ 	display/intel_dp.o \
+ 	display/intel_dp_aux.o \
+ 	display/intel_dp_aux_backlight.o \
++	display/intel_dp_samsung_amoled.o \
+ 	display/intel_dp_hdcp.o \
+ 	display/intel_dp_link_training.o \
+ 	display/intel_dp_mst.o \
+diff --git a/drivers/gpu/drm/i915/display/intel_backlight.c b/drivers/gpu/drm/i915/display/intel_backlight.c
+index 34e95f0..50b9485 100644
+--- a/drivers/gpu/drm/i915/display/intel_backlight.c
++++ b/drivers/gpu/drm/i915/display/intel_backlight.c
+@@ -21,6 +21,7 @@
+ #include "intel_display_types.h"
+ #include "intel_display_utils.h"
+ #include "intel_dp_aux_backlight.h"
++#include "intel_dp_samsung_amoled.h"
+ #include "intel_dsi_dcs_backlight.h"
+ #include "intel_panel.h"
+ #include "intel_pci_config.h"
+@@ -1714,6 +1715,8 @@ int intel_backlight_setup(struct intel_connector *connector, enum pipe pipe)
+ 
+ void intel_backlight_destroy(struct intel_panel *panel)
+ {
++	intel_dp_samsung_amoled_fini(panel);
++
+ 	/* dispose of the pwm */
+ 	if (panel->backlight.pwm)
+ 		pwm_put(panel->backlight.pwm);
+@@ -1844,6 +1847,9 @@ void intel_backlight_init_funcs(struct intel_panel *panel)
+ 	}
+ 
+ 	if (connector->base.connector_type == DRM_MODE_CONNECTOR_eDP) {
++		if (intel_dp_samsung_amoled_init_backlight(connector) == 0)
++			return;
++
+ 		if (intel_dp_aux_init_backlight_funcs(connector) == 0)
+ 			return;
+ 
+diff --git a/drivers/gpu/drm/i915/display/intel_display_types.h b/drivers/gpu/drm/i915/display/intel_display_types.h
+index 2e6a857..79c74bd 100644
+--- a/drivers/gpu/drm/i915/display/intel_display_types.h
++++ b/drivers/gpu/drm/i915/display/intel_display_types.h
+@@ -310,6 +310,8 @@ struct intel_panel_bl_funcs {
+ 	u32 (*hz_to_pwm)(struct intel_connector *connector, u32 hz);
+ };
+ 
++struct intel_samsung_amoled;
++
+ /* in 100us units */
+ struct intel_pps_delays {
+ 	u16 power_up;      /* eDP: T1+T3,   LVDS: T1+T2 */
+@@ -440,6 +442,7 @@ struct intel_panel {
+ 
+ 		const struct intel_panel_bl_funcs *funcs;
+ 		const struct intel_panel_bl_funcs *pwm_funcs;
++		struct intel_samsung_amoled *samsung_amoled;
+ 		void (*power)(struct intel_connector *, bool enable);
+ 	} backlight;
+ 
+diff --git a/drivers/gpu/drm/i915/display/intel_dp_samsung_amoled.c b/drivers/gpu/drm/i915/display/intel_dp_samsung_amoled.c
+new file mode 100644
+index 0000000..c7fda9a
+--- /dev/null
++++ b/drivers/gpu/drm/i915/display/intel_dp_samsung_amoled.c
+@@ -0,0 +1,619 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Samsung Galaxy Book 12 AMOLED backlight control
++ *
++ * The private panel protocol, calibration algorithm and register tables are
++ * derived from SamsungGalaxyBook12 by Aurelien Croc (AP2C), Copyright (C)
++ * 2022-2023. Kernel integration and fixed-point conversion Copyright (C) 2026
++ * Samsung-Galaxy-Book-12-Linux contributors.
++ */
++
++#include <linux/delay.h>
++#include <linux/dmi.h>
++#include <linux/math64.h>
++#include <linux/slab.h>
++
++#include <drm/display/drm_dp_helper.h>
++#include <drm/drm_edid.h>
++#include <drm/drm_print.h>
++
++#include "intel_display_core.h"
++#include "intel_display_types.h"
++#include "intel_dp.h"
++#include "intel_dp_samsung_amoled.h"
++#include "intel_dp_samsung_amoled_tables.h"
++
++#define SAMSUNG_AMOLED_MIN_BRIGHTNESS 10
++#define SAMSUNG_AMOLED_MAX_BRIGHTNESS 101
++#define SAMSUNG_AMOLED_SCALE 1000000000000LL
++#define SAMSUNG_AMOLED_V72 (72LL * SAMSUNG_AMOLED_SCALE / 10)
++#define SAMSUNG_AMOLED_V15 (15LL * SAMSUNG_AMOLED_SCALE / 10)
++
++struct intel_samsung_amoled {
++	struct intel_connector *connector;
++	u8 reg2_26;
++	u8 current_level;
++	u8 color_profile[ARRAY_SIZE(samsung_color_profile_base)];
++	u8 channel_adjustment[0x42][33];
++};
++
++static const struct dmi_system_id samsung_amoled_dmi_table[] = {
++	{
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "SAMSUNG ELECTRONICS CO., LTD."),
++			DMI_MATCH(DMI_PRODUCT_NAME, "Galaxy Book 12"),
++		},
++	},
++	{}
++};
++
++static int samsung_aux_write(struct drm_dp_aux *aux, unsigned int address,
++			     const void *data, size_t size)
++{
++	int ret = drm_dp_dpcd_write(aux, address, (void *)data, size);
++
++	return ret == size ? 0 : ret < 0 ? ret : -EIO;
++}
++
++static int samsung_aux_readb(struct drm_dp_aux *aux, unsigned int address,
++			     u8 *value)
++{
++	int ret = drm_dp_dpcd_readb(aux, address, value);
++
++	return ret == 1 ? 0 : ret < 0 ? ret : -EIO;
++}
++
++static int samsung_access_private_registers(struct drm_dp_aux *aux)
++{
++	static const char command[] = "PARAAUX-REG";
++	int attempt;
++
++	for (attempt = 0; attempt < 5; attempt++) {
++		u8 response;
++		int i, ret;
++
++		for (i = 0; i < sizeof(command) - 1; i++) {
++			ret = samsung_aux_write(aux, 0x490, &command[i], 1);
++			if (ret)
++				return ret;
++		}
++		ret = samsung_aux_readb(aux, 0x490, &response);
++		if (ret)
++			return ret;
++		if (response)
++			return 0;
++	}
++
++	return -EIO;
++}
++
++static int samsung_read_display_register(struct drm_dp_aux *aux, u8 reg,
++					 int type, u8 *value)
++{
++	u8 command[3];
++	int ret;
++
++	command[0] = 2;
++	command[1] = 0x7f;
++	command[2] = 1;
++	ret = samsung_aux_write(aux, 0x491, command, 3);
++	if (ret)
++		return ret;
++	command[0] = 7;
++	command[1] = 0xff;
++	command[2] = 4;
++	ret = samsung_aux_write(aux, 0x491, command, 3);
++	if (ret)
++		return ret;
++	command[0] = 3;
++	command[1] = type ? 4 : 2;
++	ret = samsung_aux_write(aux, 0x492, command, 2);
++	if (ret)
++		return ret;
++	command[0] = 6;
++	command[1] = reg;
++	ret = samsung_aux_write(aux, 0x492, command, 2);
++	if (ret)
++		return ret;
++	command[0] = 0x0a;
++	ret = samsung_aux_write(aux, 0x492, command, 1);
++	if (ret)
++		return ret;
++
++	return samsung_aux_readb(aux, 0x493, value);
++}
++
++static int samsung_read_display_register2(struct drm_dp_aux *aux,
++					  const u8 selector[3], u8 *value)
++{
++	u8 command[3];
++	int ret;
++
++	command[0] = 2;
++	command[1] = 0x7f;
++	command[2] = 1;
++	ret = samsung_aux_write(aux, 0x491, command, 3);
++	if (ret)
++		return ret;
++	command[0] = 7;
++	command[1] = 0xff;
++	command[2] = 4;
++	ret = samsung_aux_write(aux, 0x491, command, 3);
++	if (ret)
++		return ret;
++	command[0] = 0;
++	command[1] = selector[0];
++	ret = samsung_aux_write(aux, 0x492, command, 2);
++	if (ret)
++		return ret;
++	command[0] = 1;
++	command[1] = selector[2];
++	ret = samsung_aux_write(aux, 0x492, command, 2);
++	if (ret)
++		return ret;
++	command[0] = 2;
++	command[1] = selector[1];
++	ret = samsung_aux_write(aux, 0x492, command, 2);
++	if (ret)
++		return ret;
++	command[0] = 7;
++	command[1] = 0x0c;
++	ret = samsung_aux_write(aux, 0x491, command, 2);
++	if (ret)
++		return ret;
++
++	return samsung_aux_readb(aux, 0x493, value);
++}
++
++static int samsung_read_brightness_registers(struct drm_dp_aux *aux,
++					     int output[10][3])
++{
++	static const u8 selectors[33][3] = {
++		{ 2, 0, 0 },	{ 2, 0, 0x80 }, { 2, 1, 0 },	{ 2, 1, 0x80 },
++		{ 2, 2, 0 },	{ 2, 2, 0x80 }, { 2, 3, 0 },	{ 2, 3, 0x80 },
++		{ 2, 4, 0 },	{ 2, 4, 0x80 }, { 2, 5, 0 },	{ 4, 0, 0 },
++		{ 4, 0, 0x80 }, { 4, 1, 0 },	{ 4, 1, 0x80 }, { 4, 2, 0 },
++		{ 4, 2, 0x80 }, { 4, 3, 0 },	{ 4, 3, 0x80 }, { 4, 4, 0 },
++		{ 4, 4, 0x80 }, { 4, 5, 0 },	{ 8, 0, 0 },	{ 8, 0, 0x80 },
++		{ 8, 1, 0 },	{ 8, 1, 0x80 }, { 8, 2, 0 },	{ 8, 2, 0x80 },
++		{ 8, 3, 0 },	{ 8, 3, 0x80 }, { 8, 4, 0 },	{ 8, 4, 0x80 },
++		{ 8, 5, 0 },
++	};
++	u8 values[33];
++	int i, channel, ret;
++
++	for (i = 0; i < ARRAY_SIZE(values); i++) {
++		ret = samsung_read_display_register2(aux, selectors[i],
++						     &values[i]);
++		if (ret)
++			return ret;
++	}
++	memset(output, 0, sizeof(int) * 10 * 3);
++	output[1][0] = values[0x08];
++	output[1][1] = values[0x13];
++	output[1][2] = values[0x1e];
++	for (i = 0; i < 8; i++) {
++		output[i + 2][0] = values[i];
++		output[i + 2][1] = values[i + 0x0b];
++		output[i + 2][2] = values[i + 0x16];
++	}
++	for (channel = 0; channel < 3; channel++) {
++		if (values[9 + channel * 0x0b] >= 0x80)
++			output[9][channel] += 0x100;
++	}
++
++	return 0;
++}
++
++static int samsung_prepare_channel_adjustment(struct intel_samsung_amoled *data,
++					      int raw[10][3])
++{
++	s64 normalized[10][3] = {};
++	s64(*thresholds)[3];
++	int group, channel, slot;
++
++	thresholds = kcalloc(0x100, sizeof(*thresholds), GFP_KERNEL);
++	if (!thresholds)
++		return -ENOMEM;
++
++	for (channel = 0; channel < 3; channel++)
++		normalized[0][channel] = SAMSUNG_AMOLED_V72;
++	for (group = 9; group > 0; group--) {
++		int shift = samsung_adjustment_factor[group][0];
++		int maximum = samsung_adjustment_factor[group][1];
++
++		for (channel = 0; channel < 3; channel++) {
++			int value = raw[group][channel] + shift;
++			s64 range =
++				group == 9 ?
++					SAMSUNG_AMOLED_V72 -
++						SAMSUNG_AMOLED_V15 :
++					SAMSUNG_AMOLED_V72 -
++						normalized[group + 1][channel];
++
++			normalized[group][channel] =
++				SAMSUNG_AMOLED_V72 -
++				div_s64((s64)value * range, maximum);
++		}
++	}
++	for (group = 9; group > 0; group--) {
++		int first = samsung_first_index_per_group[group];
++		int count = first - samsung_first_index_per_group[group - 1];
++		int offset;
++
++		for (channel = 0; channel < 3; channel++) {
++			s64 previous = group > 1 ?
++					       normalized[group - 1][channel] :
++					       SAMSUNG_AMOLED_V72;
++			s64 value = normalized[group][channel];
++
++			for (offset = 0; offset < count; offset++)
++				thresholds[first - offset][channel] =
++					value +
++					div_s64((s64)offset *
++							(previous - value),
++						count);
++		}
++	}
++	for (channel = 0; channel < 3; channel++)
++		thresholds[0][channel] = SAMSUNG_AMOLED_V72;
++
++	for (slot = 0; slot < 0x42; slot++) {
++		u16 final[10][3] = {};
++		int pointer = 0;
++
++		for (group = 9; group > 0; group--) {
++			int shift = samsung_adjustment_factor[group][0];
++			int maximum = samsung_adjustment_factor[group][1];
++
++			for (channel = 0; channel < 3; channel++) {
++				s64 value =
++					thresholds[samsung_amoled_fraction_index
++							   [slot][group]]
++						  [channel];
++				s64 range =
++					SAMSUNG_AMOLED_V72 - SAMSUNG_AMOLED_V15;
++				int result;
++
++				if (group != 9)
++					range = SAMSUNG_AMOLED_V72 -
++						thresholds[samsung_amoled_fraction_index
++								   [slot]
++								   [group + 1]]
++							  [channel];
++				result = div64_s64((s64)maximum *
++							   (SAMSUNG_AMOLED_V72 -
++							    value),
++						   range) -
++					 shift;
++				result += samsung_brightness_shift[slot][group]
++								  [channel];
++				if (result < 0)
++					result = 0;
++				if (result > 0xff && group != 9)
++					result = 0xff;
++				final[group][channel] = result;
++			}
++		}
++		for (channel = 0; channel < 3; channel++)
++			final[0][channel] = raw[0][channel];
++		for (channel = 0; channel < 3; channel++) {
++			for (group = 2; group < 10; group++)
++				data->channel_adjustment[slot][pointer++] =
++					final[group][channel];
++			data->channel_adjustment[slot][pointer++] =
++				final[1][channel];
++			data->channel_adjustment[slot][pointer++] =
++				(final[9][channel] / 2) & 0x80;
++			data->channel_adjustment[slot][pointer++] =
++				final[0][channel];
++		}
++	}
++
++	kfree(thresholds);
++
++	return 0;
++}
++
++static void samsung_adjust_color_profile(struct intel_samsung_amoled *data,
++					 u8 reg26, u8 reg27, u8 reg28, u8 reg29)
++{
++	static const u8 indexes[] = { 0x67, 0x69, 0x6b };
++	s32 value[4], regs_a, regs_b;
++	int pointer, i;
++
++	regs_a = reg26 << 8 | reg27;
++	regs_b = (reg28 << 8 | reg29) << 10;
++	value[0] = (regs_b - 44032 * regs_a / 40 + 46080) >> 10;
++	value[1] = (regs_b - 317440 * regs_a / 297 - 3072) >> 10;
++	value[2] = (regs_b + 375808 * regs_a / 84 - 16696320) >> 10;
++	value[3] = (regs_b + 340992 * regs_a / 107 - 12693504) >> 10;
++	if (value[0] <= 0) {
++		if (value[1] >= 0)
++			pointer = value[2] > 0 ? 6 : (value[3] >> 31) + 5;
++		else
++			pointer = value[2] > 0 ? 9 : (value[3] >> 31) + 8;
++	} else {
++		pointer = value[2] > 0 ? 3 : (value[3] >> 31) + 2;
++	}
++	if (pointer - 1 > 8)
++		pointer = 1;
++	memcpy(data->color_profile, samsung_color_profile_base,
++	       sizeof(data->color_profile));
++	for (i = 0; i < ARRAY_SIZE(indexes); i++)
++		data->color_profile[indexes[i]] =
++			samsung_color_adj_a[pointer * 3 + i];
++}
++
++static int samsung_write_color_profile(struct intel_samsung_amoled *data)
++{
++	struct intel_dp *intel_dp = intel_attached_dp(data->connector);
++	u8 command[3] = { 0x0d, 0, data->color_profile[0] };
++	int i, ret;
++
++	ret = samsung_aux_write(&intel_dp->aux, 0x491, command, 3);
++	for (i = 1; !ret && i < ARRAY_SIZE(data->color_profile); i++) {
++		command[0] = i;
++		command[1] = data->color_profile[i];
++		ret = samsung_aux_write(&intel_dp->aux, 0x492, command, 2);
++	}
++
++	return ret;
++}
++
++static int samsung_write_brightness(struct intel_samsung_amoled *data,
++				    u32 level)
++{
++	struct intel_dp *intel_dp = intel_attached_dp(data->connector);
++	struct drm_dp_aux *aux = &intel_dp->aux;
++	u8 command[3];
++	u8 slot;
++	int i, ret;
++
++	level = clamp_t(u32, level, SAMSUNG_AMOLED_MIN_BRIGHTNESS,
++			SAMSUNG_AMOLED_MAX_BRIGHTNESS);
++	slot = samsung_adjustment_slot[level];
++	command[0] = 0x0f;
++	command[1] = 0xff;
++	command[2] = 0;
++	ret = samsung_aux_write(aux, 0x491, command, 3);
++	command[0] = 0x9d;
++	command[1] = samsung_brightness_c[level][0];
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x492, command, 2);
++	command[0] = 0x9b;
++	command[1] = samsung_brightness_c[level][1];
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x492, command, 2);
++	command[0] = 0x0f;
++	command[1] = 0xff;
++	command[2] = 2;
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x491, command, 3);
++	command[0] = 0x30;
++	command[1] = samsung_brightness_c2[slot];
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x492, command, 2);
++	command[0] = 0x33;
++	command[1] = data->reg2_26;
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x492, command, 2);
++	command[0] = 0x0e;
++	command[1] = 0x80;
++	command[2] = level >= 100 ? 0x80 : 0x90;
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x491, command, 3);
++	command[0] = 2;
++	command[1] = 0x7f;
++	command[2] = 1;
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x491, command, 3);
++	command[0] = 7;
++	command[1] = 0xff;
++	command[2] = 4;
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x491, command, 3);
++	for (i = 0; !ret && i < 33; i++) {
++		command[0] = 0x10 + i;
++		command[1] = data->channel_adjustment[slot][i];
++		ret = samsung_aux_write(aux, 0x492, command, 2);
++	}
++	usleep_range(1000, 1500);
++	command[0] = 0x32;
++	command[1] = 1;
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x492, command, 2);
++	command[0] = 2;
++	command[1] = 0xeb;
++	command[2] = 0x91;
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x491, command, 3);
++	command[0] = 9;
++	command[1] = 0xf0;
++	command[2] = 0xef;
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x491, command, 3);
++	command[0] = 0xf9;
++	command[1] = samsung_brightness_a[level];
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x492, command, 2);
++	command[0] = 0xf8;
++	command[1] = 0x19;
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x492, command, 2);
++	command[0] = 2;
++	command[1] = 0xeb;
++	command[2] = 0x96;
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x491, command, 3);
++	command[0] = 0x0e;
++	command[1] = 0x10;
++	command[2] = samsung_brightness_b[level][0];
++	if (!ret)
++		ret = samsung_aux_write(aux, 0x491, command, 3);
++	for (i = 1; !ret && i < 9; i++) {
++		command[0] = 0x10 + i;
++		command[1] = samsung_brightness_b[level][i];
++		ret = samsung_aux_write(aux, 0x492, command, 2);
++	}
++	if (!ret)
++		data->current_level = level;
++
++	return ret;
++}
++
++static u32 samsung_amoled_get_backlight(struct intel_connector *connector,
++					enum pipe pipe)
++{
++	struct intel_samsung_amoled *data =
++		connector->panel.backlight.samsung_amoled;
++
++	return data ? data->current_level : SAMSUNG_AMOLED_MAX_BRIGHTNESS;
++}
++
++static void
++samsung_amoled_set_backlight(const struct drm_connector_state *conn_state,
++			     u32 level)
++{
++	struct intel_connector *connector =
++		to_intel_connector(conn_state->connector);
++	struct intel_display *display = to_intel_display(connector);
++	struct intel_samsung_amoled *data =
++		connector->panel.backlight.samsung_amoled;
++	int ret;
++
++	if (!data)
++		return;
++	ret = samsung_write_brightness(data, level);
++	if (ret)
++		drm_err(display->drm,
++			"[CONNECTOR:%d:%s] AMOLED brightness write failed: %d\n",
++			connector->base.base.id, connector->base.name, ret);
++}
++
++static void
++samsung_amoled_enable_backlight(const struct intel_crtc_state *crtc_state,
++				const struct drm_connector_state *conn_state,
++				u32 level)
++{
++	struct intel_connector *connector =
++		to_intel_connector(conn_state->connector);
++	struct intel_display *display = to_intel_display(connector);
++	struct intel_samsung_amoled *data =
++		connector->panel.backlight.samsung_amoled;
++	struct intel_dp *intel_dp = intel_attached_dp(connector);
++	int ret;
++
++	if (!data)
++		return;
++	ret = samsung_access_private_registers(&intel_dp->aux);
++	if (!ret)
++		ret = samsung_write_color_profile(data);
++	if (!ret)
++		ret = samsung_write_brightness(data, level);
++	if (ret)
++		drm_err(display->drm,
++			"[CONNECTOR:%d:%s] AMOLED enable failed: %d\n",
++			connector->base.base.id, connector->base.name, ret);
++}
++
++static void
++samsung_amoled_disable_backlight(const struct drm_connector_state *conn_state,
++				 u32 level)
++{
++}
++
++static int samsung_amoled_setup_backlight(struct intel_connector *connector,
++					  enum pipe pipe)
++{
++	struct intel_display *display = to_intel_display(connector);
++	struct intel_panel *panel = &connector->panel;
++	struct intel_dp *intel_dp = intel_attached_dp(connector);
++	struct intel_samsung_amoled *data;
++	u8 registers[5];
++	int raw[10][3];
++	u32 initial_level = SAMSUNG_AMOLED_MAX_BRIGHTNESS;
++	int pwm_ret, ret, i;
++
++	pwm_ret = panel->backlight.pwm_funcs->setup(connector, pipe);
++	if (!pwm_ret && panel->backlight.max)
++		initial_level = DIV_ROUND_CLOSEST_ULL((u64)panel->backlight.level *
++						      SAMSUNG_AMOLED_MAX_BRIGHTNESS,
++						      panel->backlight.max);
++	data = kzalloc_obj(*data);
++	if (!data) {
++		ret = -ENOMEM;
++		goto fallback;
++	}
++	data->connector = connector;
++	ret = samsung_access_private_registers(&intel_dp->aux);
++	for (i = 0; !ret && i < 4; i++)
++		ret = samsung_read_display_register(&intel_dp->aux, 0x26 + i, 0,
++						    &registers[i]);
++	if (!ret)
++		ret = samsung_read_display_register(&intel_dp->aux, 0x26, 1,
++						    &registers[4]);
++	if (!ret)
++		ret = samsung_read_brightness_registers(&intel_dp->aux, raw);
++	if (!ret) {
++		samsung_adjust_color_profile(data, registers[0], registers[1],
++					     registers[2], registers[3]);
++		ret = samsung_prepare_channel_adjustment(data, raw);
++	}
++	if (ret) {
++		kfree(data);
++		goto fallback;
++	}
++	data->reg2_26 = registers[4];
++	data->current_level = clamp_t(u32, initial_level,
++				      SAMSUNG_AMOLED_MIN_BRIGHTNESS,
++				      SAMSUNG_AMOLED_MAX_BRIGHTNESS);
++	panel->backlight.samsung_amoled = data;
++	panel->backlight.min = SAMSUNG_AMOLED_MIN_BRIGHTNESS;
++	panel->backlight.max = SAMSUNG_AMOLED_MAX_BRIGHTNESS;
++	panel->backlight.level = data->current_level;
++	panel->backlight.enabled = false;
++	drm_info(display->drm,
++		 "[CONNECTOR:%d:%s] Samsung Galaxy Book 12 AMOLED backlight initialized\n",
++		 connector->base.base.id, connector->base.name);
++
++	return 0;
++
++fallback:
++	panel->backlight.funcs = panel->backlight.pwm_funcs;
++	drm_warn(display->drm,
++		 "[CONNECTOR:%d:%s] AMOLED setup failed (%d), falling back to PWM\n",
++		 connector->base.base.id, connector->base.name, ret);
++
++	return pwm_ret;
++}
++
++static const struct intel_panel_bl_funcs samsung_amoled_bl_funcs = {
++	.setup = samsung_amoled_setup_backlight,
++	.enable = samsung_amoled_enable_backlight,
++	.disable = samsung_amoled_disable_backlight,
++	.set = samsung_amoled_set_backlight,
++	.get = samsung_amoled_get_backlight,
++};
++
++int intel_dp_samsung_amoled_init_backlight(struct intel_connector *connector)
++{
++	struct intel_panel *panel = &connector->panel;
++	u32 panel_id;
++
++	if (!dmi_check_system(samsung_amoled_dmi_table) ||
++	    IS_ERR_OR_NULL(panel->fixed_edid))
++		return -ENODEV;
++	panel_id = drm_edid_get_panel_id(panel->fixed_edid);
++	if (panel_id != drm_edid_encode_panel_id('S', 'D', 'C', 0xa029))
++		return -ENODEV;
++	panel->backlight.funcs = &samsung_amoled_bl_funcs;
++
++	return 0;
++}
++
++void intel_dp_samsung_amoled_fini(struct intel_panel *panel)
++{
++	kfree(panel->backlight.samsung_amoled);
++	panel->backlight.samsung_amoled = NULL;
++}
+diff --git a/drivers/gpu/drm/i915/display/intel_dp_samsung_amoled.h b/drivers/gpu/drm/i915/display/intel_dp_samsung_amoled.h
+new file mode 100644
+index 0000000..60e58d4
+--- /dev/null
++++ b/drivers/gpu/drm/i915/display/intel_dp_samsung_amoled.h
+@@ -0,0 +1,11 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef __INTEL_DP_SAMSUNG_AMOLED_H__
++#define __INTEL_DP_SAMSUNG_AMOLED_H__
++
++struct intel_connector;
++struct intel_panel;
++
++int intel_dp_samsung_amoled_init_backlight(struct intel_connector *connector);
++void intel_dp_samsung_amoled_fini(struct intel_panel *panel);
++
++#endif
+diff --git a/drivers/gpu/drm/i915/display/intel_dp_samsung_amoled_tables.h b/drivers/gpu/drm/i915/display/intel_dp_samsung_amoled_tables.h
+new file mode 100644
+index 0000000..b129ecd
+--- /dev/null
++++ b/drivers/gpu/drm/i915/display/intel_dp_samsung_amoled_tables.h
+@@ -0,0 +1,1072 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/* Derived from SamsungGalaxyBook12 by Aurelien Croc (AP2C). */
++#ifndef __INTEL_DP_SAMSUNG_AMOLED_TABLES_H__
++#define __INTEL_DP_SAMSUNG_AMOLED_TABLES_H__
++static const u8 samsung_color_profile_base[] = {
++	0x98, 0x24, 0xB3, 1,	0x0E, 1,    0,	  0x77, 0x17, 3,    0x96, 2,
++	0xFF, 0,    0x60, 1,	0,    1,    0,	  0x14, 0,    1,    0,	  1,
++	0,    0x60, 0x3F, 0xFF, 0x28, 0x3C, 1,	  0,	0,    0x10, 0x20, 0x30,
++	0x40, 0x50, 0x60, 0x70, 0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xE0, 0xF0, 1,
++	0,    0,    0,	  0,	0,    0,    0x30, 0x6A, 0x9A, 0x25, 0x1A, 0x16,
++	0x2A, 0,    0x37, 0x5A, 0,    0x4E, 0xC5, 0,	0x5D, 0x17, 0,	  0x30,
++	0xC3, 0xFF, 0x3B, 0x50, 0xFF, 0xF0, 0,	  0xD8, 0,    0xD9, 0xFF, 0xFF,
++	0xFF, 0,    0xE0, 0xFF, 0,    0xF6, 0,	  0xD8, 0x3B, 0,    0xFF, 0xD9,
++	0,    0xFF, 0x14, 0xF9, 0,    0,    0xFF, 0xFF, 0,    0xFF, 0,	  0xFF,
++	0,    1,    0,	  0x3E, 0,    0,    8,	  0x70, 5,    0xA0
++};
++
++static const u8 samsung_color_adj_a[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFB, 0xFB,
++					  0xFF, 0xFC, 0xFF, 0xFB, 0xF9, 0xFF,
++					  0xFF, 0xFE, 0xFC, 0xFF, 0xFF, 0xFF,
++					  0xFB, 0xFC, 0xFF, 0xFD, 0xFF, 0xFB,
++					  0xFB, 0xFF, 0xFC, 0xFB, 0xFF, 0xFF };
++
++static const u8 samsung_color_adj_b[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xF7, 0xED,
++					  0xFF, 0xF8, 0xF0, 0xFF, 0xF8, 0xF4,
++					  0xFF, 0xF9, 0xED, 0xFF, 0xFA, 0xF0,
++					  0xFF, 0xFB, 0xF4, 0xFF, 0xFB, 0xED,
++					  0xFF, 0xFD, 0xF0, 0xFF, 0xFF, 0xF4 };
++
++/*
++ * Brightness management
++ */
++static const s16 samsung_adjustment_factor[10][2] = {
++	{ 0x00, 0x258 }, { 0x40, 0x140 }, { 0x40, 0x140 }, { 0x40, 0x140 },
++	{ 0x40, 0x140 }, { 0x40, 0x140 }, { 0x40, 0x140 }, { 0x40, 0x140 },
++	{ 0x40, 0x140 }, { 0x81, 0x280 }
++};
++
++static const u8 samsung_first_index_per_group[10] = { 0,    3,	  0xB,	0x17,
++						      0x23, 0x33, 0x57, 0x97,
++						      0xCB, 0xFF };
++static const s16 samsung_brightness_shift[0x42][10][3] = {
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -4, 2, -2 },
++		{ -5, 0, -4 },
++		{ -3, 1, -2 },
++		{ -8, 3, -5 },
++		{ -10, 4, -5 },
++		{ -6, 0, -4 },
++		{ -4, 0, -3 },
++		{ -11, 1, -7 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -4, 2, -2 },
++		{ -5, 1, -4 },
++		{ -6, 1, -4 },
++		{ -11, 3, -8 },
++		{ -10, 2, -5 },
++		{ -6, 0, -4 },
++		{ -3, 0, -3 },
++		{ -7, 0, -3 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -3, 2, -3 },
++		{ -6, 1, -4 },
++		{ -7, 2, -5 },
++		{ -11, 3, -8 },
++		{ -10, 2, -5 },
++		{ -4, 0, -4 },
++		{ -3, 0, -3 },
++		{ -5, 0, -2 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -4, 1, -4 },
++		{ -4, 1, -4 },
++		{ -8, 1, -5 },
++		{ -10, 4, -7 },
++		{ -8, 3, -5 },
++		{ -3, 1, -3 },
++		{ -2, 1, -2 },
++		{ -4, 0, -2 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -3, 1, -4 },
++		{ -6, 1, -4 },
++		{ -7, 1, -4 },
++		{ -11, 3, -7 },
++		{ -8, 3, -5 },
++		{ -3, 1, -3 },
++		{ -1, 0, -1 },
++		{ -3, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -3, 2, -4 },
++		{ -5, 1, -4 },
++		{ -7, 1, -4 },
++		{ -10, 3, -6 },
++		{ -8, 3, -4 },
++		{ -3, 1, -3 },
++		{ -1, 0, -1 },
++		{ -3, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -4, 1, -4 },
++		{ -5, 1, -4 },
++		{ -6, 1, -4 },
++		{ -10, 3, -6 },
++		{ -7, 3, -4 },
++		{ -2, 1, -3 },
++		{ -1, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 2, -4 },
++		{ -5, 1, -4 },
++		{ -6, 1, -4 },
++		{ -9, 3, -6 },
++		{ -7, 3, -4 },
++		{ -3, 1, -3 },
++		{ -1, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -5, 1, -4 },
++		{ -5, 2, -3 },
++		{ -8, 1, -5 },
++		{ -9, 3, -5 },
++		{ -5, 3, -3 },
++		{ -2, 1, -2 },
++		{ -1, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -5, 1, -3 },
++		{ -7, 2, -5 },
++		{ -7, 2, -5 },
++		{ -9, 3, -6 },
++		{ -7, 1, -4 },
++		{ -2, 0, -2 },
++		{ 0, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -5, 1, -3 },
++		{ -9, 2, -6 },
++		{ -6, 2, -5 },
++		{ -8, 3, -6 },
++		{ -7, 1, -4 },
++		{ -2, 0, -2 },
++		{ 0, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 2, -5 },
++		{ -8, 2, -6 },
++		{ -6, 2, -5 },
++		{ -7, 2, -6 },
++		{ -6, 1, -3 },
++		{ -2, 0, -2 },
++		{ 0, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 2, -4 },
++		{ -8, 2, -6 },
++		{ -6, 2, -5 },
++		{ -7, 2, -6 },
++		{ -6, 1, -3 },
++		{ -2, 0, -2 },
++		{ 0, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 2, -4 },
++		{ -8, 2, -6 },
++		{ -6, 2, -5 },
++		{ -7, 2, -5 },
++		{ -6, 1, -3 },
++		{ -2, 0, -2 },
++		{ 0, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 2, -4 },
++		{ -8, 2, -6 },
++		{ -6, 2, -5 },
++		{ -7, 2, -5 },
++		{ -6, 1, -3 },
++		{ -2, 0, -2 },
++		{ 0, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 2, -4 },
++		{ -8, 2, -6 },
++		{ -6, 2, -5 },
++		{ -7, 2, -5 },
++		{ -5, 1, -3 },
++		{ -2, 0, -2 },
++		{ 0, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 3, -4 },
++		{ -8, 2, -5 },
++		{ -6, 2, -5 },
++		{ -7, 2, -4 },
++		{ -5, 1, -3 },
++		{ -2, 0, -2 },
++		{ 0, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 2, -4 },
++		{ -7, 2, -5 },
++		{ -5, 2, -4 },
++		{ -5, 2, -3 },
++		{ -2, 1, -1 },
++		{ -2, 0, -1 },
++		{ -2, 0, -1 },
++		{ -2, 0, -1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -8, 2, -5 },
++		{ -7, 2, -5 },
++		{ -6, 2, -4 },
++		{ -5, 2, -4 },
++		{ -4, 1, -2 },
++		{ -2, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -7, 3, -5 },
++		{ -6, 2, -4 },
++		{ -6, 2, -4 },
++		{ -5, 2, -4 },
++		{ -4, 1, -2 },
++		{ -2, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 2, -5 },
++		{ -9, 3, -6 },
++		{ -6, 2, -4 },
++		{ -5, 2, -4 },
++		{ -4, 1, -2 },
++		{ -1, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 3, -5 },
++		{ -9, 2, -6 },
++		{ -5, 2, -4 },
++		{ -5, 1, -4 },
++		{ -4, 1, -2 },
++		{ -1, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -7, 2, -5 },
++		{ -9, 2, -6 },
++		{ -5, 2, -4 },
++		{ -5, 1, -4 },
++		{ -4, 1, -2 },
++		{ -1, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -7, 1, -5 },
++		{ -9, 2, -6 },
++		{ -5, 2, -4 },
++		{ -4, 1, -4 },
++		{ -4, 0, -2 },
++		{ -1, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -7, 2, -5 },
++		{ -8, 2, -5 },
++		{ -5, 2, -4 },
++		{ -4, 1, -3 },
++		{ -4, 0, -2 },
++		{ -1, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -7, 2, -5 },
++		{ -7, 2, -5 },
++		{ -5, 2, -4 },
++		{ -4, 1, -3 },
++		{ -4, 0, -2 },
++		{ 0, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -7, 1, -6 },
++		{ -8, 3, -5 },
++		{ -5, 1, -4 },
++		{ -4, 1, -3 },
++		{ -4, 0, -2 },
++		{ 0, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -8, 2, -6 },
++		{ -6, 2, -5 },
++		{ -4, 1, -3 },
++		{ -4, 1, -3 },
++		{ -4, 0, -2 },
++		{ 0, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -11, 2, -7 },
++		{ -5, 2, -4 },
++		{ -4, 1, -4 },
++		{ -3, 1, -2 },
++		{ -4, 0, -2 },
++		{ 0, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -11, 2, -7 },
++		{ -6, 2, -4 },
++		{ -5, 1, -4 },
++		{ -3, 1, -3 },
++		{ -2, 0, -1 },
++		{ 0, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -11, 2, -6 },
++		{ -5, 2, -4 },
++		{ -6, 1, -4 },
++		{ -2, 1, -2 },
++		{ -2, 0, -1 },
++		{ 0, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -11, 3, -6 },
++		{ -4, 1, -3 },
++		{ -5, 1, -3 },
++		{ -2, 1, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -11, 3, -6 },
++		{ -5, 1, -3 },
++		{ -4, 1, -3 },
++		{ -2, 1, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -11, 2, -5 },
++		{ -4, 1, -3 },
++		{ -3, 1, -2 },
++		{ -2, 1, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -11, 2, -5 },
++		{ -3, 1, -2 },
++		{ -4, 1, -3 },
++		{ -2, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -11, 2, -5 },
++		{ -3, 1, -2 },
++		{ -4, 1, -2 },
++		{ -2, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, -2 },
++		{ 0, 0, -1 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -11, 2, -4 },
++		{ -4, 1, -3 },
++		{ -4, 1, -2 },
++		{ -1, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -11, 2, -5 },
++		{ -4, 0, -2 },
++		{ -3, 1, -2 },
++		{ -1, 0, -2 },
++		{ -1, 0, 0 },
++		{ 0, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -12, 2, -5 },
++		{ -3, 0, -2 },
++		{ -2, 1, -2 },
++		{ -1, 0, -1 },
++		{ -1, 0, 0 },
++		{ 0, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -12, 2, -5 },
++		{ -3, 0, -2 },
++		{ -2, 1, -2 },
++		{ -1, 0, -1 },
++		{ -1, 0, 0 },
++		{ 0, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -12, 2, -6 },
++		{ -3, 0, -2 },
++		{ -2, 1, -2 },
++		{ -1, 0, -1 },
++		{ -1, 0, 0 },
++		{ 0, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -12, 2, -6 },
++		{ -3, 0, -2 },
++		{ -2, 1, -2 },
++		{ -1, 0, -1 },
++		{ -1, 0, 0 },
++		{ 0, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -12, 2, -6 },
++		{ -3, 0, -2 },
++		{ -2, 1, -2 },
++		{ -1, 0, -1 },
++		{ -1, 0, 0 },
++		{ 0, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -10, 3, -6 },
++		{ -4, 0, -3 },
++		{ -1, 0, -1 },
++		{ 1, 1, -1 },
++		{ -1, 0, 0 },
++		{ 0, 0, -1 },
++		{ 1, 0, 0 },
++		{ 0, 0, 1 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -10, 2, -6 },
++		{ -2, 0, -2 },
++		{ -1, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -10, 2, -6 },
++		{ -2, 0, -2 },
++		{ -1, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -10, 2, -6 },
++		{ -2, 0, -2 },
++		{ -1, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -9, 2, -6 },
++		{ -2, 0, -2 },
++		{ -1, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -9, 2, -6 },
++		{ -2, 0, -2 },
++		{ -1, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -9, 2, -6 },
++		{ -2, 0, -2 },
++		{ -1, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -9, 2, -6 },
++		{ -2, 0, -1 },
++		{ -1, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -9, 2, -6 },
++		{ 0, 1, -1 },
++		{ -1, 0, -1 },
++		{ -2, 0, -1 },
++		{ 0, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -7, 1, -4 },
++		{ -3, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -7, 2, -4 },
++		{ -3, 0, -2 },
++		{ -1, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -7, 1, -4 },
++		{ -2, 0, -1 },
++		{ -1, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 1, -3 },
++		{ -1, 0, 0 },
++		{ -1, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 1, -4 },
++		{ -1, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ -6, 1, -4 },
++		{ -1, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, -1 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++	{
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++		{ 0, 0, 0 },
++	},
++};
++
++static const u8 samsung_adjustment_slot[] = {
++	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
++	0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
++	0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23,
++	0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
++	0x2F, 0x30, 0x30, 0x30, 0x31, 0x31, 0x31, 0x32, 0x32, 0x33, 0x33, 0x33,
++	0x34, 0x34, 0x34, 0x35, 0x35, 0x35, 0x36, 0x36, 0x36, 0x37, 0x37, 0x37,
++	0x38, 0x38, 0x38, 0x39, 0x39, 0x39, 0x3A, 0x3A, 0x3A, 0x3B, 0x3B, 0x3B,
++	0x3C, 0x3C, 0x3C, 0x3D, 0x3D, 0x3D, 0x3E, 0x3E, 0x3E, 0x3F, 0x3F, 0x3F,
++	0x40, 0x40, 0x40, 0x40, 0x40, 0x40
++};
++
++static const u8 samsung_brightness_a[] = {
++	0x04, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0B, 0x0C, 0x0D, 0x0D, 0x0E,
++	0x0F, 0x10, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x16, 0x17, 0x19,
++	0x1A, 0x1B, 0x1C, 0x1E, 0x1F, 0x20, 0x21, 0x24, 0x26, 0x28, 0x2A, 0x2D,
++	0x2F, 0x32, 0x35, 0x38, 0x3B, 0x40, 0x43, 0x48, 0x4C, 0x50, 0x55, 0x59,
++	0x5B, 0x5D, 0x5F, 0x60, 0x62, 0x64, 0x66, 0x69, 0x6B, 0x6F, 0x71, 0x73,
++	0x76, 0x78, 0x7A, 0x7C, 0x7F, 0x81, 0x84, 0x87, 0x8A, 0x8D, 0x90, 0x92,
++	0x95, 0x99, 0x9C, 0x9E, 0xA3, 0xA6, 0xAA, 0xAD, 0xB1, 0xB5, 0xB9, 0xBC,
++	0xC1, 0xC4, 0xC8, 0xCD, 0xD1, 0xD5, 0xDB, 0xDE, 0xE1, 0xE7, 0xEA, 0xEE,
++	0xF2, 0xF5, 0xF8, 0xFC, 0xF9, 0xF9
++};
++
++static const u8 samsung_brightness_b[][9] = {
++	{ 1, 1, 1, 0, 0, 0, 0, 0, 0 },
++	{ 1, 1, 1, 0, 0, 0, 1, 1, 0 },
++	{ 1, 1, 1, 1, 1, 1, 0, 0, 0 },
++	{ 2, 2, 1, 0, 0, 1, 1, 1, 0 },
++	{ 2, 2, 2, 1, 1, 0, 0, 0, 1 },
++	{ 3, 3, 2, 0, 0, 1, 1, 1, 0 },
++	{ 3, 3, 2, 1, 1, 1, 0, 0, 0 },
++	{ 3, 3, 3, 1, 1, 0, 1, 1, 1 },
++	{ 4, 4, 3, 1, 0, 1, 0, 1, 0 },
++	{ 4, 4, 3, 1, 1, 1, 1, 1, 1 },
++	{ 4, 4, 3, 2, 1, 2, 0, 1, 0 },
++	{ 5, 5, 4, 1, 1, 1, 1, 1, 0 },
++	{ 5, 5, 4, 2, 1, 1, 0, 1, 1 },
++	{ 6, 5, 4, 1, 2, 2, 1, 1, 0 },
++	{ 6, 6, 5, 2, 1, 1, 0, 1, 1 },
++	{ 6, 6, 5, 2, 2, 1, 1, 1, 1 },
++	{ 7, 7, 5, 2, 1, 2, 1, 2, 1 },
++	{ 7, 7, 6, 2, 2, 2, 1, 2, 0 },
++	{ 8, 8, 6, 2, 1, 2, 1, 2, 1 },
++	{ 8, 8, 6, 2, 2, 2, 1, 2, 1 },
++	{ 9, 9, 7, 2, 2, 2, 1, 2, 1 },
++	{ 9, 9, 7, 3, 2, 2, 1, 2, 2 },
++	{ 0x0A, 0x0A, 8, 3, 2, 2, 1, 2, 1 },
++	{ 0x0B, 0x0A, 8, 3, 3, 3, 1, 2, 1 },
++	{ 0x0B, 0x0B, 9, 3, 2, 2, 1, 3, 2 },
++	{ 0x0C, 0x0B, 9, 3, 3, 3, 1, 3, 2 },
++	{ 0x0D, 0x0C, 0x0A, 3, 3, 3, 1, 3, 1 },
++	{ 0x0E, 0x0D, 0x0B, 3, 4, 3, 2, 3, 2 },
++	{ 0x0F, 0x0E, 0x0B, 3, 3, 4, 2, 4, 1 },
++	{ 0x0F, 0x0F, 0x0C, 4, 3, 3, 2, 4, 2 },
++	{ 0x10, 0x10, 0x0D, 5, 4, 4, 1, 3, 2 },
++	{ 0x11, 0x11, 0x0E, 5, 4, 4, 2, 4, 2 },
++	{ 0x13, 0x12, 0x0E, 4, 4, 5, 2, 5, 2 },
++	{ 0x14, 0x13, 0x0F, 5, 5, 5, 2, 4, 2 },
++	{ 0x15, 0x14, 0x10, 5, 5, 5, 2, 5, 3 },
++	{ 0x16, 0x16, 0x11, 6, 5, 6, 2, 5, 2 },
++	{ 0x18, 0x17, 0x12, 6, 6, 6, 2, 5, 3 },
++	{ 0x19, 0x18, 0x14, 7, 6, 6, 2, 6, 3 },
++	{ 0x1B, 0x1A, 0x15, 7, 6, 6, 2, 6, 3 },
++	{ 0x1D, 0x1C, 0x16, 7, 6, 7, 3, 7, 4 },
++	{ 0x1F, 0x1D, 0x18, 7, 8, 7, 3, 7, 4 },
++	{ 0x20, 0x1F, 0x19, 9, 8, 8, 3, 7, 4 },
++	{ 0x23, 0x21, 0x1B, 9, 9, 8, 3, 7, 4 },
++	{ 0x24, 0x23, 0x1C, 0x0A, 9, 9, 4, 8, 4 },
++	{ 0x27, 0x26, 0x1E, 0x0A, 9, 0x0A, 4, 9, 4 },
++	{ 0x29, 0x28, 0x20, 0x0B, 0x0A, 0x0A, 4, 9, 5 },
++	{ 0x2C, 0x2B, 0x22, 0x0C, 0x0A, 0x0B, 4, 0x0A, 5 },
++	{ 0x2E, 0x2C, 0x23, 0x0C, 0x0B, 0x0B, 4, 0x0A, 6 },
++	{ 0x2F, 0x2D, 0x24, 0x0C, 0x0B, 0x0C, 5, 0x0B, 5 },
++	{ 0x30, 0x2E, 0x25, 0x0C, 0x0C, 0x0C, 5, 0x0A, 5 },
++	{ 0x31, 0x2F, 0x26, 0x0D, 0x0C, 0x0C, 4, 0x0B, 5 },
++	{ 0x32, 0x30, 0x27, 0x0D, 0x0C, 0x0C, 5, 0x0B, 6 },
++	{ 0x33, 0x31, 0x28, 0x0D, 0x0C, 0x0C, 5, 0x0C, 6 },
++	{ 0x34, 0x32, 0x28, 0x0E, 0x0D, 0x0D, 5, 0x0B, 6 },
++	{ 0x35, 0x33, 0x29, 0x0E, 0x0D, 0x0D, 5, 0x0C, 6 },
++	{ 0x37, 0x35, 0x2B, 0x0E, 0x0D, 0x0D, 6, 0x0C, 6 },
++	{ 0x39, 0x36, 0x2C, 0x0E, 0x0E, 0x0D, 6, 0x0D, 7 },
++	{ 0x3A, 0x38, 0x2D, 0x0F, 0x0D, 0x0E, 6, 0x0D, 7 },
++	{ 0x3B, 0x39, 0x2E, 0x0F, 0x0E, 0x0E, 6, 0x0D, 7 },
++	{ 0x3C, 0x3A, 0x2F, 0x10, 0x0E, 0x0E, 6, 0x0E, 7 },
++	{ 0x3E, 0x3B, 0x30, 0x10, 0x0F, 0x0E, 6, 0x0E, 8 },
++	{ 0x3F, 0x3C, 0x31, 0x10, 0x0F, 0x0F, 6, 0x0E, 7 },
++	{ 0x40, 0x3E, 0x32, 0x11, 0x0F, 0x0F, 6, 0x0E, 8 },
++	{ 0x41, 0x3F, 0x33, 0x11, 0x10, 0x0F, 7, 0x0E, 8 },
++	{ 0x43, 0x40, 0x34, 0x11, 0x10, 0x10, 7, 0x0F, 8 },
++	{ 0x44, 0x42, 0x35, 0x12, 0x10, 0x10, 7, 0x0F, 8 },
++	{ 0x46, 0x43, 0x36, 0x12, 0x11, 0x11, 7, 0x0F, 8 },
++	{ 0x47, 0x44, 0x37, 0x13, 0x11, 0x11, 7, 0x10, 9 },
++	{ 0x49, 0x46, 0x38, 0x13, 0x11, 0x12, 7, 0x10, 8 },
++	{ 0x4A, 0x47, 0x39, 0x13, 0x12, 0x12, 8, 0x11, 9 },
++	{ 0x4C, 0x49, 0x3B, 0x13, 0x12, 0x12, 8, 0x11, 9 },
++	{ 0x4D, 0x4A, 0x3C, 0x14, 0x13, 0x12, 8, 0x11, 9 },
++	{ 0x4F, 0x4C, 0x3D, 0x14, 0x13, 0x13, 8, 0x11, 9 },
++	{ 0x50, 0x4D, 0x3E, 0x15, 0x13, 0x13, 8, 0x12, 0x0A },
++	{ 0x52, 0x4F, 0x40, 0x15, 0x13, 0x13, 8, 0x13, 0x0A },
++	{ 0x54, 0x51, 0x41, 0x15, 0x13, 0x14, 9, 0x13, 0x0A },
++	{ 0x55, 0x52, 0x42, 0x17, 0x15, 0x15, 8, 0x13, 0x0A },
++	{ 0x57, 0x54, 0x44, 0x17, 0x15, 0x14, 8, 0x13, 0x0B },
++	{ 0x59, 0x56, 0x45, 0x17, 0x15, 0x15, 9, 0x14, 0x0B },
++	{ 0x5B, 0x57, 0x46, 0x18, 0x16, 0x16, 8, 0x14, 0x0B },
++	{ 0x5D, 0x59, 0x48, 0x18, 0x16, 0x16, 9, 0x15, 0x0B },
++	{ 0x5F, 0x5B, 0x49, 0x18, 0x17, 0x17, 0x0A, 0x15, 0x0B },
++	{ 0x61, 0x5D, 0x4B, 0x19, 0x17, 0x17, 9, 0x16, 0x0C },
++	{ 0x63, 0x5F, 0x4D, 0x19, 0x18, 0x17, 0x0A, 0x16, 0x0C },
++	{ 0x65, 0x61, 0x4E, 0x1A, 0x18, 0x18, 0x0A, 0x17, 0x0C },
++	{ 0x67, 0x63, 0x50, 0x1B, 0x19, 0x18, 0x0A, 0x17, 0x0D },
++	{ 0x69, 0x65, 0x51, 0x1B, 0x19, 0x1A, 0x0B, 0x18, 0x0C },
++	{ 0x6B, 0x67, 0x53, 0x1C, 0x1A, 0x1A, 0x0B, 0x18, 0x0D },
++	{ 0x6D, 0x69, 0x55, 0x1D, 0x1A, 0x1A, 0x0B, 0x19, 0x0D },
++	{ 0x70, 0x6C, 0x57, 0x1D, 0x1A, 0x1A, 0x0B, 0x19, 0x0E },
++	{ 0x72, 0x6D, 0x58, 0x1D, 0x1C, 0x1B, 0x0B, 0x19, 0x0E },
++	{ 0x74, 0x6F, 0x5A, 0x1E, 0x1C, 0x1B, 0x0B, 0x1A, 0x0E },
++	{ 0x76, 0x71, 0x5B, 0x1E, 0x1C, 0x1C, 0x0C, 0x1B, 0x0E },
++	{ 0x78, 0x73, 0x5D, 0x1F, 0x1D, 0x1D, 0x0C, 0x1B, 0x0E },
++	{ 0x7A, 0x75, 0x5F, 0x20, 0x1D, 0x1D, 0x0B, 0x1C, 0x0E },
++	{ 0x7C, 0x77, 0x60, 0x20, 0x1E, 0x1E, 0x0C, 0x1C, 0x0F },
++	{ 0x7E, 0x79, 0x62, 0x21, 0x1E, 0x1E, 0x0C, 0x1D, 0x0F },
++	{ 0x80, 0x7B, 0x63, 0x21, 0x1F, 0x1F, 0x0D, 0x1C, 0x0F },
++	{ 0x82, 0x7D, 0x65, 0x22, 0x1F, 0x1F, 0x0D, 0x1D, 0x0F },
++	{ 0x84, 0x7F, 0x66, 0x22, 0x20, 0x20, 0x0D, 0x1D, 0x10 },
++	{ 0x86, 0x81, 0x68, 0x23, 0x20, 0x20, 0x0D, 0x1E, 0x10 },
++	{ 0, 0, 0, 0, 0, 0, 0, 0, 0 }
++};
++
++static const u8 samsung_brightness_c[][2] = {
++	{ 0x0B, 0x60 }, { 0x0B, 0x48 }, { 0x0B, 0x30 }, { 0x0B, 0x18 },
++	{ 0x0B, 0 },	{ 0x0A, 0xE8 }, { 0x0A, 0xD0 }, { 0x0A, 0xB8 },
++	{ 0x0A, 0xA0 }, { 0x0A, 0x88 }, { 0x0A, 0x70 }, { 0x0A, 0x58 },
++	{ 0x0A, 0x40 }, { 0x0A, 0x28 }, { 0x0A, 8 },	{ 9, 0xF0 },
++	{ 9, 0xC0 },	{ 9, 0xA0 },	{ 9, 0x88 },	{ 9, 0x68 },
++	{ 9, 0x38 },	{ 9, 0x20 },	{ 8, 0xE8 },	{ 8, 0xB0 },
++	{ 8, 0xA8 },	{ 8, 0x70 },	{ 8, 0x30 },	{ 7, 0xD0 },
++	{ 7, 0xB0 },	{ 7, 0x68 },	{ 7, 0x18 },	{ 6, 0xB0 },
++	{ 6, 0x58 },	{ 5, 0xF8 },	{ 5, 0xA0 },	{ 5, 0x30 },
++	{ 4, 0x98 },	{ 4, 0x30 },	{ 4, 0x30 },	{ 4, 0x30 },
++	{ 4, 0x30 },	{ 4, 0x30 },	{ 4, 0x30 },	{ 4, 0x30 },
++	{ 4, 0x30 },	{ 4, 0x30 },	{ 4, 0x30 },	{ 4, 0x65 },
++	{ 4, 0x30 },	{ 4, 0x69 },	{ 4, 0x30 },	{ 4, 0x80 },
++	{ 4, 0x58 },	{ 4, 0x30 },	{ 4, 0x7B },	{ 4, 0x55 },
++	{ 4, 0x30 },	{ 4, 0x7E },	{ 4, 0x57 },	{ 4, 0x30 },
++	{ 4, 0x79 },	{ 4, 0x55 },	{ 4, 0x30 },	{ 4, 8 },
++	{ 3, 0xE0 },	{ 3, 0xB8 },	{ 3, 0x85 },	{ 3, 0x53 },
++	{ 3, 0x20 },	{ 2, 0xF0 },	{ 2, 0xC0 },	{ 2, 0x90 },
++	{ 2, 0x55 },	{ 2, 0x1B },	{ 1, 0xE0 },	{ 1, 0xA8 },
++	{ 1, 0x70 },	{ 1, 0x38 },	{ 0, 0xF5 },	{ 0, 0xB3 },
++	{ 0, 0x70 },	{ 0, 0xE3 },	{ 0, 0xA9 },	{ 0, 0x70 },
++	{ 0, 0xE3 },	{ 0, 0xA9 },	{ 0, 0x70 },	{ 0, 0xE2 },
++	{ 0, 0xA9 },	{ 0, 0x70 },	{ 0, 0xD0 },	{ 0, 0xA0 },
++	{ 0, 0x70 },	{ 0, 0xD1 },	{ 0, 0xA1 },	{ 0, 0x70 },
++	{ 1, 0x1B },	{ 0, 0xF1 },	{ 0, 0xC6 },	{ 0, 0x9B },
++	{ 0, 0x70 },	{ 0, 0x70 },
++};
++
++static const u8 samsung_brightness_c2[] = {
++	0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C,
++	0x8D, 0x8D, 0x8D, 0x8D, 0x8D, 0x8E, 0x8E, 0x8E, 0x8F, 0x8F, 0x8F,
++	0x90, 0x90, 0x90, 0x91, 0x91, 0x92, 0x92, 0x93, 0x94, 0x94, 0x95,
++	0x96, 0x96, 0x97, 0x98, 0x98, 0x98, 0x98, 0x98, 0x98, 0x98, 0x98,
++	0x97, 0x97, 0x96, 0x96, 0x95, 0x94, 0x94, 0x93, 0x93, 0x93, 0x92,
++	0x92, 0x92, 0x91, 0x91, 0x90, 0x8F, 0x8E, 0x8D, 0x8C, 0x8A, 0x8A
++};
++
++static const u16 samsung_amoled_fraction_index[0x42][10] = {
++	{ 0, 48, 53, 68, 70, 73, 84, 113, 132, 152 },
++	{ 0, 47, 53, 56, 60, 64, 77, 106, 132, 152 },
++	{ 0, 43, 49, 51, 55, 61, 75, 106, 130, 152 },
++	{ 0, 37, 42, 46, 49, 54, 70, 102, 128, 152 },
++	{ 0, 35, 40, 43, 46, 51, 68, 99, 127, 152 },
++	{ 0, 33, 37, 41, 45, 50, 67, 99, 127, 152 },
++	{ 0, 27, 34, 37, 41, 47, 65, 98, 127, 152 },
++	{ 0, 27, 33, 37, 41, 47, 65, 98, 127, 152 },
++	{ 0, 27, 31, 35, 40, 46, 65, 98, 127, 152 },
++	{ 0, 25, 31, 34, 38, 45, 63, 97, 126, 152 },
++	{ 0, 25, 30, 33, 37, 44, 62, 97, 126, 152 },
++	{ 0, 23, 28, 32, 36, 43, 62, 96, 126, 152 },
++	{ 0, 21, 27, 31, 35, 42, 61, 96, 126, 152 },
++	{ 0, 21, 26, 30, 35, 42, 61, 96, 126, 152 },
++	{ 0, 20, 26, 30, 34, 41, 60, 96, 126, 152 },
++	{ 0, 16, 25, 29, 33, 41, 60, 95, 126, 152 },
++	{ 0, 16, 24, 28, 32, 40, 59, 95, 126, 152 },
++	{ 0, 15, 23, 27, 32, 39, 60, 95, 125, 152 },
++	{ 0, 15, 22, 26, 31, 38, 58, 95, 125, 152 },
++	{ 0, 15, 21, 26, 31, 38, 58, 95, 125, 152 },
++	{ 0, 14, 21, 25, 30, 38, 58, 95, 125, 152 },
++	{ 0, 13, 21, 25, 30, 38, 58, 94, 125, 152 },
++	{ 0, 9, 20, 24, 29, 37, 58, 94, 125, 152 },
++	{ 0, 8, 19, 23, 29, 37, 57, 93, 125, 152 },
++	{ 0, 8, 19, 23, 28, 36, 56, 93, 125, 152 },
++	{ 0, 8, 18, 23, 28, 36, 56, 94, 125, 152 },
++	{ 0, 8, 18, 22, 28, 36, 56, 94, 125, 152 },
++	{ 0, 8, 17, 22, 27, 35, 56, 94, 125, 152 },
++	{ 0, 8, 16, 21, 27, 35, 56, 94, 125, 152 },
++	{ 0, 8, 16, 21, 26, 35, 56, 94, 125, 152 },
++	{ 0, 7, 15, 20, 26, 34, 56, 94, 125, 152 },
++	{ 0, 7, 15, 20, 25, 34, 55, 93, 125, 152 },
++	{ 0, 7, 14, 19, 25, 34, 55, 93, 125, 152 },
++	{ 0, 7, 13, 19, 25, 34, 55, 93, 125, 152 },
++	{ 0, 7, 13, 19, 25, 33, 55, 93, 124, 152 },
++	{ 0, 6, 12, 18, 24, 33, 55, 93, 124, 152 },
++	{ 0, 6, 12, 18, 24, 33, 53, 93, 124, 152 },
++	{ 0, 6, 12, 18, 24, 33, 53, 91, 124, 152 },
++	{ 0, 6, 11, 17, 22, 31, 53, 91, 124, 152 },
++	{ 0, 5, 11, 17, 22, 31, 53, 91, 124, 152 },
++	{ 0, 5, 11, 17, 24, 32, 55, 95, 125, 156 },
++	{ 0, 5, 11, 18, 25, 33, 58, 97, 129, 161 },
++	{ 0, 5, 11, 18, 24, 34, 58, 99, 132, 165 },
++	{ 0, 5, 11, 18, 24, 35, 60, 104, 136, 170 },
++	{ 0, 4, 12, 19, 25, 36, 63, 107, 140, 174 },
++	{ 0, 4, 12, 19, 26, 37, 64, 109, 143, 178 },
++	{ 0, 4, 12, 20, 26, 38, 67, 113, 147, 184 },
++	{ 0, 4, 12, 20, 27, 39, 68, 116, 151, 189 },
++	{ 0, 4, 12, 19, 28, 40, 68, 119, 155, 194 },
++	{ 0, 5, 12, 21, 29, 41, 72, 123, 159, 199 },
++	{ 0, 5, 13, 21, 29, 42, 74, 122, 163, 204 },
++	{ 0, 5, 12, 22, 30, 44, 74, 129, 169, 210 },
++	{ 0, 4, 13, 21, 31, 45, 76, 132, 173, 216 },
++	{ 0, 4, 12, 21, 31, 45, 76, 132, 173, 216 },
++	{ 0, 4, 12, 21, 31, 45, 76, 132, 173, 216 },
++	{ 0, 3, 11, 21, 31, 45, 76, 131, 173, 216 },
++	{ 0, 3, 10, 21, 31, 45, 76, 131, 173, 216 },
++	{ 0, 3, 10, 21, 31, 45, 76, 129, 173, 216 },
++	{ 0, 3, 10, 21, 31, 45, 76, 129, 173, 216 },
++	{ 0, 3, 10, 21, 32, 46, 78, 133, 178, 222 },
++	{ 0, 3, 11, 22, 33, 47, 80, 137, 183, 229 },
++	{ 0, 3, 11, 22, 34, 49, 82, 141, 188, 235 },
++	{ 0, 3, 11, 23, 35, 50, 84, 144, 193, 241 },
++	{ 0, 3, 11, 24, 35, 51, 86, 148, 198, 247 },
++	{ 0, 3, 11, 23, 35, 51, 87, 151, 203, 255 },
++	{ 0, 3, 11, 23, 35, 51, 87, 151, 203, 255 },
++};
++#endif
+-- 
+2.55.0
+

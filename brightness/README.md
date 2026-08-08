@@ -4,6 +4,12 @@ The Galaxy Book 12 exposes an `intel_backlight` slider, but changing it does
 not program the AMOLED panel correctly. This component mirrors that slider to
 the panel's private registers over the eDP AUX channel.
 
+There are now two implementations:
+
+- the userspace service documented below, which is the tested fallback;
+- an experimental native `i915` patch under [`kernel/`](kernel/README.md),
+  which needs no watcher or fade.
+
 It only runs when all of these match:
 
 - DMI product `Galaxy Book 12` from Samsung Electronics;
@@ -66,6 +72,24 @@ To remove it:
 ```bash
 sudo ./brightness/uninstall.sh
 ```
+
+## Native driver
+
+The native version performs the same calibrated register writes inside `i915`
+and exposes panel levels 10–101 directly through the standard backlight device.
+It is deliberately immediate: the userspace fade is not carried into the
+kernel driver.
+
+Build it with:
+
+```bash
+./brightness/kernel/build-module.sh
+```
+
+Do not run the service and native implementation together. The native
+installer disables the service and restores its enabled state when removed.
+Build, installation, verification and recovery instructions are in
+[`brightness/kernel/README.md`](kernel/README.md).
 
 ## Credits
 

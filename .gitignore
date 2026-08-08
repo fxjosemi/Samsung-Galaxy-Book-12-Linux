@@ -8,3 +8,5 @@ build/
 Module.symvers
 modules.order
 brightness/galaxybook12-brightness
+brightness/kernel/tools/generate-fraction-index
+brightness/kernel/tools/validate-fixed-point
