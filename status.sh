@@ -19,6 +19,16 @@ audio_userspace="$(systemctl is-enabled alc298-book12-init.service 2>/dev/null |
 brightness_service="$(systemctl is-active galaxybook12-brightness.service 2>/dev/null || true)"
 brightness_program="missing"
 [ -x /usr/local/sbin/galaxybook12-brightness ] && brightness_program="installed"
+sensor_module="$(modinfo -n st_accel_i2c 2>/dev/null || printf unavailable)"
+sensor_name="not found"
+for name in /sys/bus/iio/devices/iio:device*/name; do
+    [ -r "$name" ] || continue
+    if [ "$(cat "$name")" = "lis2hh12" ]; then
+        sensor_name="lis2hh12 ($(basename "$(dirname "$name")"))"
+        break
+    fi
+done
+sensor_proxy="$(systemctl is-active iio-sensor-proxy.service 2>/dev/null || true)"
 
 printf 'System\n'
 printf '  DMI product: %s\n' "$product"
@@ -35,3 +45,8 @@ if [ -x /usr/local/sbin/galaxybook12-brightness ]; then
 elif [ -x "$(dirname "$0")/brightness/galaxybook12-brightness" ]; then
     "$(dirname "$0")/brightness/galaxybook12-brightness" check 2>&1 | sed 's/^/  /'
 fi
+
+printf '\nOrientation sensor\n'
+printf '  IIO device: %s\n' "$sensor_name"
+printf '  ST I2C module: %s\n' "$sensor_module"
+printf '  Sensor proxy: %s\n' "${sensor_proxy:-not installed}"

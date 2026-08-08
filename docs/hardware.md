@@ -11,6 +11,9 @@
 | Speaker pin | NID `0x17` |
 | Speaker DAC path | `0x02 -> 0x0c -> 0x17` |
 | Headphone DAC path | `0x03 -> 0x0d -> 0x17` |
+| Accelerometer ACPI ID | `SAM0201` |
+| Accelerometer implementation | Samsung K2HH / LIS2HH12 compatible |
+| Accelerometer I2C address | `0x1d` |
 
 ## Amplifier selectors
 
@@ -60,3 +63,20 @@ The jack produces a short click when inserted. It remains with PCM closed,
 pin `0x17` disabled, EAPD disabled, mic bias at `VREF_HIZ`, and the codec
 runtime-suspended. The original Windows-derived scripts do not contain another
 depop sequence. No unverified coefficient workaround is included.
+
+## Orientation sensor
+
+ACPI describes the accelerometer at `\_SB.PCI0.I2C5.ACC1` with ID `SAM0201`.
+The device responds as an LIS2HH12-compatible ST accelerometer and is exposed
+by IIO as `lis2hh12` after adding the missing ACPI match.
+
+The firmware `ROTM` method returns this mount matrix:
+
+```text
+ 0 -1  0
+-1  0  0
+ 0  0 -1
+```
+
+Reading that matrix in the driver produces the correct `normal`, `left-up`,
+`right-up` and `bottom-up` orientations without a userspace model quirk.

@@ -1,0 +1,51 @@
+From 5dbfe78c749175fb7e3dcf6b3342025444a0f719 Mon Sep 17 00:00:00 2001
+From: Jose Miguel <xjosmei@users.noreply.github.com>
+Date: Sat, 8 Aug 2026 06:35:00 +0200
+Subject: [PATCH] iio: accel: st_accel: add Samsung K2HH ACPI support
+
+Samsung Galaxy Book 12 firmware describes its K2HH accelerometer with the
+SAM0201 ACPI ID.  The part is register-compatible with LIS2HH12 and reports
+the expected 0x41 WHO_AM_I value.
+
+Add the missing ACPI match and use the standard ROTM object when the existing
+ST-specific ACPI orientation method is absent.  This lets the IIO core expose
+the firmware-provided mount matrix to userspace.
+
+Tested on a Samsung Galaxy Book 12 SM-W720.  The same board hardware is used
+by the SM-W727 family.
+
+Signed-off-by: Jose Miguel <xjosmei@users.noreply.github.com>
+---
+ drivers/iio/accel/st_accel_core.c | 3 +++
+ drivers/iio/accel/st_accel_i2c.c  | 1 +
+ 2 files changed, 4 insertions(+)
+
+diff --git a/drivers/iio/accel/st_accel_core.c b/drivers/iio/accel/st_accel_core.c
+index f387eb56f819..b6da43f70418 100644
+--- a/drivers/iio/accel/st_accel_core.c
++++ b/drivers/iio/accel/st_accel_core.c
+@@ -1585,6 +1585,9 @@ int st_accel_common_probe(struct iio_dev *indio_dev)
+ 	 * generic function.
+ 	 */
+ 	err = apply_acpi_orientation(indio_dev);
++	if (err && iio_read_acpi_mount_matrix(parent, &adata->mount_matrix,
++					       "ROTM"))
++		err = 0;
+ 	if (err) {
+ 		err = iio_read_mount_matrix(parent, &adata->mount_matrix);
+ 		if (err)
+diff --git a/drivers/iio/accel/st_accel_i2c.c b/drivers/iio/accel/st_accel_i2c.c
+index 2c78da709569..0d522bceff6b 100644
+--- a/drivers/iio/accel/st_accel_i2c.c
++++ b/drivers/iio/accel/st_accel_i2c.c
+@@ -131,6 +131,7 @@ static const struct of_device_id st_accel_of_match[] = {
+ MODULE_DEVICE_TABLE(of, st_accel_of_match);
+ 
+ static const struct acpi_device_id st_accel_acpi_match[] = {
++	{"SAM0201", (kernel_ulong_t)LIS2HH12_ACCEL_DEV_NAME},
+ 	{"SMO8840", (kernel_ulong_t)LIS2DH12_ACCEL_DEV_NAME},
+ 	{"SMO8A90", (kernel_ulong_t)LNG2DM_ACCEL_DEV_NAME},
+ 	{ }
+-- 
+2.50.1
+

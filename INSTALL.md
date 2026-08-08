@@ -121,3 +121,11 @@ sudo ./uninstall.sh
 
 This fallback initializes the internal speakers only. It intentionally does
 not automate headphone routing.
+
+## Other components
+
+AMOLED brightness and the orientation sensor have separate instructions and
+installers because neither requires the audio patch:
+
+- [AMOLED brightness](brightness/README.md)
+- [Accelerometer and automatic rotation](sensors/README.md)

@@ -45,3 +45,21 @@ Include this output, the exact model code and `uname -r` in bug reports.
 For the speaker-only fallback, use `./status.sh` after cold boot and resume.
 Do not automate its `headphones` action; only the native driver prepares the
 dedicated headphone DAC and mixer.
+
+## Orientation sensor
+
+After installing the sensor modules and rebooting, check:
+
+```bash
+modinfo -n st_accel
+modinfo -n st_accel_i2c
+cat /sys/bus/iio/devices/iio:device*/name
+cat /sys/bus/iio/devices/iio:device*/mount_matrix
+systemctl is-active iio-sensor-proxy
+monitor-sensor
+```
+
+Both module paths should contain `updates/galaxybook12-sensor`, the device name
+should be `lis2hh12`, and `monitor-sensor` should report all four orientations.
+With rotation unlocked, verify portrait and both landscape directions in a
+Wayland session. Repeat after suspend/resume and a cold boot.

@@ -82,6 +82,28 @@ installer preserves the distribution driver and provides a rollback script.
 More details and manual testing commands are in
 [brightness/README.md](brightness/README.md).
 
+### Accelerometer and screen rotation
+
+Samsung exposes the internal K2HH accelerometer as ACPI device `SAM0201`, but
+the standard ST accelerometer driver does not match that ID. The sensor patch
+binds it to the compatible LIS2HH12 implementation and reads the `ROTM` mount
+matrix provided by the firmware. GNOME then receives all four orientations
+through the normal IIO and `iio-sensor-proxy` interfaces.
+
+Build and install the two small IIO modules:
+
+```bash
+./sensors/kernel/build-module.sh
+sudo ./sensors/kernel/install.sh \
+  "sensors/kernel/build/$(uname -r)"
+sudo reboot
+```
+
+The live implementation has been tested on the development SM-W720 with Linux
+7.1.6: the panel follows rotation immediately and the firmware axis mapping is
+correct. See [sensors/README.md](sensors/README.md) for verification and
+removal instructions.
+
 ## Supported family
 
 The fixes are expected to cover the SM-W720 Wi-Fi and SM-W727 LTE families,

@@ -18,3 +18,6 @@
 - Use the dedicated DAC `0x03` and mixer `0x0d` headphone path.
 - Add native module build, install, verification, and rollback scripts.
 - Document the remaining jack insertion click.
+- Add native support for the `SAM0201` Samsung K2HH accelerometer.
+- Read the firmware `ROTM` mount matrix through the standard IIO interface.
+- Add guarded sensor build, installation, verification, and removal scripts.
