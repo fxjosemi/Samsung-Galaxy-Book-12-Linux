@@ -99,10 +99,12 @@ sudo ./sensors/kernel/install.sh \
 sudo reboot
 ```
 
-The live implementation has been tested on the development SM-W720 with Linux
-7.1.6: the panel follows rotation immediately and the firmware axis mapping is
-correct. See [sensors/README.md](sensors/README.md) for verification and
-removal instructions.
+The complete implementation has been tested across a cold boot on the
+development SM-W720 with Linux 7.1.6 and GNOME/Mutter 50.4: the panel follows
+rotation and the firmware axis mapping is correct.  Mutter 50.4 also needs an
+upstream session-start fix on this device; a reproducible native Arch/CachyOS
+package is included.  See [sensors/README.md](sensors/README.md) for diagnosis,
+installation and removal instructions.
 
 ## Supported family
 

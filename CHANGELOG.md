@@ -21,3 +21,7 @@
 - Add native support for the `SAM0201` Samsung K2HH accelerometer.
 - Read the firmware `ROTM` mount matrix through the standard IIO interface.
 - Add guarded sensor build, installation, verification, and removal scripts.
+- Add the upstream Mutter session-start fix required for persistent automatic
+  rotation with GNOME 50.4.
+- Add a reproducible, memory-limited Arch/CachyOS Mutter package builder and
+  rollback instructions.

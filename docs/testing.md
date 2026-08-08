@@ -62,4 +62,17 @@ monitor-sensor
 Both module paths should contain `updates/galaxybook12-sensor`, the device name
 should be `lis2hh12`, and `monitor-sensor` should report all four orientations.
 With rotation unlocked, verify portrait and both landscape directions in a
-Wayland session. Repeat after suspend/resume and a cold boot.
+Wayland session. Repeat after suspend/resume and a cold boot.  If the sensor
+works but GNOME does not rotate after login, verify the compositor claim with:
+
+```bash
+busctl get-property net.hadess.SensorProxy \
+  /net/hadess/SensorProxy net.hadess.SensorProxy AccelerometerOrientation
+busctl --user get-property org.gnome.Mutter.DisplayConfig \
+  /org/gnome/Mutter/DisplayConfig \
+  org.gnome.Mutter.DisplayConfig PanelOrientationManaged
+```
+
+The orientation must not be `undefined`, and panel orientation management must
+be enabled in tablet mode.  GNOME/Mutter 50.4 may require the native patch in
+`sensors/mutter/` for this state to survive a fresh login.

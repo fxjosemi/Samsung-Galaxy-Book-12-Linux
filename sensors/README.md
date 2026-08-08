@@ -62,6 +62,17 @@ The name should be `lis2hh12`.  On the Galaxy Book 12, the firmware matrix is:
 GNOME on Wayland should then rotate the internal panel when rotation lock is
 disabled and tablet mode is active.
 
+### GNOME 50.4 does not rotate after login
+
+Some GNOME 50.4 builds contain a Mutter lifecycle bug: the IIO sensor works,
+but the compositor does not claim it when the session starts.  A live test may
+rotate correctly and then stop working after a reboot.  This is separate from
+the kernel driver and is fixed by an upstream Mutter change.
+
+If `monitor-sensor` follows all four orientations but GNOME does not, see the
+[native Mutter fix](mutter/README.md).  It patches the compositor itself and
+does not require a startup script or background service.
+
 ## Kernel updates and removal
 
 External modules are tied to one kernel release.  Rebuild and reinstall after
@@ -80,6 +91,8 @@ kernel.
 
 ## Development
 
-The upstream-style change is in `kernel/patches/`.  It adds the ACPI match to
-`st_accel_i2c.c` and standard `ROTM` support to the shared ST accelerometer
-core.  The latter is useful to other ACPI-described ST accelerometers as well.
+The upstream-style sensor change is in `kernel/patches/`.  It adds the ACPI
+match to `st_accel_i2c.c` and standard `ROTM` support to the shared ST
+accelerometer core.  The latter is useful to other ACPI-described ST
+accelerometers as well.  The independent GNOME session-start correction is in
+`mutter/patches/` and comes from the official Mutter repository.

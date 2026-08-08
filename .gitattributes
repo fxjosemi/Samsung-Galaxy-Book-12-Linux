@@ -1,2 +1,3 @@
 brightness/kernel/patches/*.patch -whitespace
 sensors/kernel/patches/*.patch -whitespace
+sensors/mutter/patches/*.patch -whitespace
