@@ -120,4 +120,3 @@ touch "$STATE_DIR/installed"
 
 echo "Galaxy Book 12 accelerometer modules installed for $KERNEL_RELEASE."
 echo "Reboot, then check the IIO device and automatic screen rotation."
-

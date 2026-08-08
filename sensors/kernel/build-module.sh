@@ -111,4 +111,3 @@ done
 
 echo "Built modules in: $output_dir"
 echo "Install them with: sudo ./sensors/kernel/install.sh '$output_dir'"
-

@@ -58,4 +58,3 @@ rmdir /var/lib/galaxybook12-sensor 2>/dev/null || true
 
 echo "Galaxy Book 12 accelerometer modules removed for $KERNEL_RELEASE."
 echo "The distribution modules will be used after reboot."
-

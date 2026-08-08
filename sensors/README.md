@@ -83,4 +83,3 @@ kernel.
 The upstream-style change is in `kernel/patches/`.  It adds the ACPI match to
 `st_accel_i2c.c` and standard `ROTM` support to the shared ST accelerometer
 core.  The latter is useful to other ACPI-described ST accelerometers as well.
-
