@@ -31,8 +31,8 @@ volume and stop on distortion, imbalance, unexpected heat, smell, or a large
 analog transient. A complete shutdown resets volatile codec state.
 
 Follow [`docs/testing.md`](docs/testing.md) and report each result separately.
-Do not claim automatic headphone routing is safe on SM-W720: the currently
-known incomplete route produces a large click in the headphones.
+The native route is the supported jack implementation. The userspace
+`headphones` action remains a manual diagnostic only.
 
 ## Patches
 
@@ -40,5 +40,5 @@ known incomplete route produces a large click in the headphones.
 - Preserve attribution for the Windows/QEMU-derived tables.
 - Run `bash -n` on shell scripts and compile-check Python files.
 - Explain any COEF change and the exact hardware on which it was measured.
-- Keep native kernel work separate until it passes cold boot, resume, and jack
-  switching tests on the physical tablet.
+- Build native changes with `W=1` and test cold boot, resume, jack switching,
+  channel separation and volume on physical hardware.

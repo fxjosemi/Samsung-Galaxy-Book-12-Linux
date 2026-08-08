@@ -6,5 +6,7 @@
   Galaxy Book 12 (`144d:c14f`).
 - Add udev-triggered startup and suspend/resume restoration.
 - Add guarded diagnostics, status, install, and uninstall commands.
-- Exclude automatic headphone routing after confirming a large analog
-  transient from the incomplete userspace path.
+- Add a native Realtek driver patch with automatic speaker/headphone routing.
+- Use the dedicated DAC `0x03` and mixer `0x0d` headphone path.
+- Add native module build, install, verification, and rollback scripts.
+- Document the remaining jack insertion click.

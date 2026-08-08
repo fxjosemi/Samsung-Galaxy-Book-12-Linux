@@ -28,5 +28,5 @@ depmod -a "$KERNEL_RELEASE"
 systemctl daemon-reload
 udevadm control --reload-rules
 
-echo "Native test module removed and userspace files restored."
+echo "Native module removed and userspace files restored."
 echo "Reboot to load the distribution driver."

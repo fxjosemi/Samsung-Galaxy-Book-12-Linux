@@ -5,11 +5,12 @@
 | Field | Value |
 |---|---|
 | Product | Samsung Galaxy Book 12 |
-| Board/model family | SM-W720 |
+| Board/model family | SM-W720 / SM-W727 |
 | Codec | Realtek ALC298 (`0x10ec0298`) |
 | Codec subsystem | Samsung `0x144dc14f` |
 | Speaker pin | NID `0x17` |
 | Speaker DAC path | `0x02 -> 0x0c -> 0x17` |
+| Headphone DAC path | `0x03 -> 0x0d -> 0x17` |
 
 ## Amplifier selectors
 
@@ -38,12 +39,10 @@ All entries below are indirect register writes made after selecting bank
 
 These values were tested audibly on the physical tablet.
 
-However, selecting the headphone table while ALSA continues to use the
-speaker playback path (`0x02 -> 0x0c`) causes a large analog transient in the
-headphones, including when PCM playback is silent. Windows instead uses DAC
-`0x03` through mixer `0x0d` for the headset. Automatic userspace routing is
-therefore deliberately excluded from the installer. These values are retained
-only as input for the future native driver fix.
+Selecting the headphone table from userspace leaves ALSA on the speaker path
+and is not suitable for automatic routing. The native quirk mirrors the front
+stream to DAC `0x03`, selects mixer `0x0d`, and keeps its hardware volume in
+sync with DAC `0x02`.
 
 ## Jack reporting
 
@@ -52,7 +51,12 @@ generic HDA parser. NID `0x18` is presented as the external microphone jack,
 and Linux reports insertion through an input device named `HDA Intel PCH Mic`
 with switch code `SW_MICROPHONE_INSERT`.
 
-The native driver fix therefore needs to attach its vendor-route callback to
-the detected microphone jack event instead of relying on generic headphone
-automute, and it must switch the playback path to DAC `0x03` / mixer `0x0d`
-before enabling the headphone vendor route.
+The native driver attaches its route callback to this microphone jack event
+instead of relying on generic headphone automute.
+
+## Known insertion click
+
+The jack produces a short click when inserted. It remains with PCM closed,
+pin `0x17` disabled, EAPD disabled, mic bias at `VREF_HIZ`, and the codec
+runtime-suspended. The original Windows-derived scripts do not contain another
+depop sequence. No unverified coefficient workaround is included.

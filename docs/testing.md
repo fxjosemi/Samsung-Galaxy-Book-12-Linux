@@ -1,43 +1,47 @@
 # Hardware validation checklist
 
-## 1. Identity and installation
+## Driver and hardware
 
 ```bash
-./status.sh
-systemctl status alc298-book12-init.service
+modinfo -n snd_hda_codec_alc269
+cat /sys/class/sound/hwC*D*/vendor_id
+cat /sys/class/sound/hwC*D*/subsystem_id
 ```
 
-Expected identity is `Galaxy Book 12`, codec `0x10ec0298`, subsystem
-`0x144dc14f`. The initialization unit is a udev-triggered oneshot and normally
-shows `inactive (dead)` after completing; its last result must be `success`.
+The module path should contain `updates/alc298-book12`. Expected codec IDs are
+`0x10ec0298` and `0x144dc14f`.
 
-## 2. Cold boot
+## Cold boot
 
-Perform a full shutdown, wait several seconds, then power on. After login:
+After a full shutdown and power-on, run:
 
 ```bash
-./status.sh
 speaker-test -D plughw:0,0 -c 2 -t wav -l 1
 ```
 
-Verify the left and right channels independently at low volume.
+Check left and right channels independently at low volume.
 
-## 3. Suspend and resume
+## Headphone jack
 
-Suspend once, resume, and repeat the stereo test. The system-sleep hook should
-restore the amplifier state if the codec lost it.
+Connect the jack with playback stopped, then test left and right channels.
+Verify that volume changes work and that unplugging returns playback to the
+internal speakers. A short click at insertion is a known limitation.
 
-## 4. Volume and stability
+## Suspend and resume
 
-Check several normal volume levels. This repository does not install software
-gain, a limiter, a virtual sink, or a custom PipeWire profile.
+Suspend once, resume, and repeat both output tests. The codec initialization
+and current route should be restored by the native driver.
 
-## 5. Headphone limitation
+## Kernel log
 
-Automatic headphone routing is not part of the safe userspace installation.
-Do not repeatedly run the experimental `headphones` action: the recovered
-vendor table switches the physical output but leaves ALSA on the speaker DAC
-and mixer, causing a large analog transient even without PCM playback.
+```bash
+journalctl -k -b | grep -E 'ALC298|144d:c14f|snd_hda_codec_alc269'
+```
 
-Native driver work must switch to DAC `0x03` and mixer `0x0d` before the
-headphone route can be considered ready for end users.
+Include this output, the exact model code and `uname -r` in bug reports.
+
+## Userspace fallback
+
+For the speaker-only fallback, use `./status.sh` after cold boot and resume.
+Do not automate its `headphones` action; only the native driver prepares the
+dedicated headphone DAC and mixer.

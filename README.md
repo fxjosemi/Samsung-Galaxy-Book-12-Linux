@@ -1,111 +1,81 @@
-# Samsung Galaxy Book 12 ALC298 Linux audio
+# Samsung Galaxy Book 12 audio on Linux
 
-Linux audio support for the 2017 Samsung Galaxy Book 12 (SM-W720/SM-W727) with
-the Realtek ALC298 codec.
+This repository fixes the Realtek ALC298 audio found in the 2017 Samsung
+Galaxy Book 12. It was developed and tested on an SM-W720 with audio subsystem
+ID `144d:c14f`.
 
-The machine is identified by:
+The native driver patch provides:
 
-- DMI product: `Galaxy Book 12`
-- codec vendor ID: `0x10ec0298`
-- codec subsystem ID: `0x144dc14f`
+- working internal speakers;
+- automatic switching between speakers and the 3.5 mm jack;
+- separate speaker and headphone DAC paths;
+- working stereo separation and volume control;
+- correct routing after suspend and resume.
 
-Without a model-specific codec fixup, Linux leaves the codec-internal speaker
-amplifiers uninitialized. The speakers are silent, and the combo jack does not
-select the Windows vendor route even though its buttons and insertion switch
-are reported by the kernel.
+There is one known limitation: plugging in the jack produces a short click.
+The click remains even when the codec output, EAPD and microphone bias are
+disabled. Everything after insertion works normally.
 
-## Project status
+## Supported hardware
 
-The userspace workaround has been tested on the real hardware:
+The fix is matched by the codec IDs, not by the regional product suffix:
 
-- both internal speaker channels work;
-- the speaker amplifier is restored after suspend.
-
-Automatic headphone routing is intentionally not installed. The recovered
-vendor route produces a large analog transient in the headphones even with no
-PCM playback. A safe fix needs native driver control of the separate Windows
-headphone path (DAC `0x03` and mixer `0x0d`).
-
-Tested environment:
-
-- Samsung Galaxy Book 12 / SM-W720;
-- board `SM-W720NZKBPHE`;
-- ALC298 subsystem `144d:c14f`;
-- CachyOS with Linux `7.1.6-1-cachyos`.
-
-This repository contains the guarded, known-working userspace implementation
-and an experimental native ALSA HDA quirk. The native work lives under
-[`kernel/`](kernel/README.md) and is kept separate from the default installer
-until its jack switching has passed hardware testing.
-
-The native quirk matches audio subsystem `144d:c14f`, not a regional product
-suffix. It is intended to cover Wi-Fi and LTE Galaxy Book 12 variants with the
-same audio hardware. Known SM-W720 and SM-W727 sales codes are listed in the
-native-driver documentation.
-
-## Userspace installation
-
-Install the runtime dependency:
-
-```bash
-# Arch Linux
-sudo pacman -S alsa-tools
-
-# Debian or Ubuntu
-sudo apt install alsa-tools
+```text
+Codec:      Realtek ALC298 (10ec:0298)
+Subsystem:  Samsung 144d:c14f
 ```
 
-Then install the fix from the repository root:
+This ID is used by the SM-W720 and SM-W727 Galaxy Book 12 family. The installer
+refuses to continue if it does not find the exact codec and subsystem IDs.
+
+## Installation
+
+The native driver is the recommended option. Install the headers for the
+kernel you are currently running, then build and install the module:
+
+```bash
+git clone https://github.com/fxjosemi/Samsung-Galaxy-Book-12-Linux.git
+cd Samsung-Galaxy-Book-12-Linux
+./kernel/build-module.sh
+sudo ./kernel/install-native.sh \
+  "kernel/build/$(uname -r)/snd-hda-codec-alc269.ko"
+sudo reboot
+```
+
+The build script downloads the matching kernel.org source when no source tree
+is supplied. See [INSTALL.md](INSTALL.md) for dependencies, verification,
+kernel updates and removal.
+
+There is also an older speaker-only userspace workaround:
 
 ```bash
 sudo ./install.sh
 ```
 
-The installer refuses to write codec coefficients unless both the DMI product
-and the exact ALC298 subsystem ID match. A hardware-specific udev rule starts
-initialization only after that codec device exists.
+It is useful when building a kernel module is not possible, but it does not
+switch the headphone route. Installing the native module automatically disables
+this workaround so both implementations cannot write the codec at once.
 
-To uninstall:
+## How it works
 
-```bash
-sudo ./uninstall.sh
+The firmware leaves two internal amplifiers uninitialized and describes the
+shared output pin `0x17` only as a fixed speaker. The patch adds a quirk for
+`144d:c14f`, initializes both amplifiers, uses mic pin `0x18` as the reliable
+jack detector, and switches the shared output between:
+
+```text
+Speakers:    DAC 0x02 -> mixer 0x0c -> pin 0x17
+Headphones:  DAC 0x03 -> mixer 0x0d -> pin 0x17
 ```
 
-After installation or a reboot, check the detected hardware and last
-initialization result with:
+The amplifier and routing tables come from Aurélien Croc's GPL-2.0
+[Windows/QEMU trace work](https://github.com/Teetoow/SamsungGalaxyBook12).
+Technical notes are in [docs/hardware.md](docs/hardware.md).
 
-```bash
-./status.sh
-```
+## Contributing
 
-## Hardware findings
+Reports from other SM-W720 and SM-W727 variants are welcome. Include the output
+of `userspace/collect-diagnostics.sh` and do not test vendor coefficient writes
+on a different subsystem ID.
 
-- speaker pin: NID `0x17`;
-- playback path: DAC `0x02` -> mixer `0x0c` -> pin `0x17`;
-- left internal amplifier selector: COEF `0x22 = 0x31`;
-- right internal amplifier selector: COEF `0x22 = 0x34`;
-- vendor routing/DSP selector: COEF `0x22 = 0x1b`;
-- combo-jack insertion is exposed as `SW_MICROPHONE_INSERT` by the
-  `HDA Intel PCH Mic` input device.
-
-The amplifier and DSP sequences are derived from Aurélien Croc's GPL-2.0
-Windows/QEMU trace analysis for this exact model:
-<https://github.com/Teetoow/SamsungGalaxyBook12>.
-
-See [`docs/hardware.md`](docs/hardware.md) for the tested routes and codec
-findings. The repeatable validation procedure is in
-[`docs/testing.md`](docs/testing.md).
-
-## Safety
-
-Realtek vendor COEF registers are undocumented and hardware-specific. Do not
-run this code on a different subsystem ID. Begin testing at low volume and stop
-on distortion, imbalance, unexpected heat, or noise. A complete power-off
-resets the codec and its internal amplifiers.
-
-## License
-
-GPL-2.0-only. See [`LICENSE`](LICENSE).
-
-Contributions and reports from the exact hardware are welcome. Read
-[`CONTRIBUTING.md`](CONTRIBUTING.md) before testing vendor COEF changes.
+The project is licensed under GPL-2.0-only. See [LICENSE](LICENSE).

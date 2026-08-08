@@ -50,7 +50,7 @@ esac
 install -d -m 755 "$MODULE_DIR" "$BACKUP_DIR"
 install -m 644 "$MODULE_SOURCE" "$MODULE_DEST"
 
-# The native driver must be the only component writing the vendor route.
+# Do not let the older userspace workaround overwrite the native route.
 for old_path in \
     /etc/udev/rules.d/99-alc298-book12-init.rules \
     /etc/systemd/system/alc298-book12-init.service \
@@ -72,5 +72,5 @@ if [ "$(readlink -f "$selected")" != "$(readlink -f "$MODULE_DEST")" ]; then
     exit 1
 fi
 
-echo "Native test module installed: $MODULE_DEST"
-echo "The currently loaded driver is unchanged. Reboot to start the test."
+echo "Native module installed: $MODULE_DEST"
+echo "Reboot to load it."
