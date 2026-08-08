@@ -1,10 +1,17 @@
-# Samsung Galaxy Book 12 audio on Linux
+# Samsung Galaxy Book 12 on Linux
 
-This repository fixes the Realtek ALC298 audio found in the 2017 Samsung
-Galaxy Book 12. It was developed and tested on an SM-W720 with audio subsystem
-ID `144d:c14f`.
+Compatibility fixes for the 2017 Samsung Galaxy Book 12 family. The project is
+developed on an SM-W720 and is intended for the Wi-Fi and LTE variants that
+share the same board hardware.
 
-The native driver patch provides:
+Each component has its own hardware checks, installer and removal procedure.
+You can install only the fixes you need.
+
+## Current fixes
+
+### ALC298 audio
+
+The native Realtek driver patch provides:
 
 - working internal speakers;
 - automatic switching between speakers and the 3.5 mm jack;
@@ -12,70 +19,79 @@ The native driver patch provides:
 - working stereo separation and volume control;
 - correct routing after suspend and resume.
 
-There is one known limitation: plugging in the jack produces a short click.
-The click remains even when the codec output, EAPD and microphone bias are
-disabled. Everything after insertion works normally.
+It matches codec `10ec:0298` with Samsung subsystem `144d:c14f`, rather than a
+regional model suffix. A short click when inserting the jack remains as a known
+hardware limitation.
 
-## Supported hardware
-
-The fix is matched by the codec IDs, not by the regional product suffix:
-
-```text
-Codec:      Realtek ALC298 (10ec:0298)
-Subsystem:  Samsung 144d:c14f
-```
-
-This ID is used by the SM-W720 and SM-W727 Galaxy Book 12 family. The installer
-refuses to continue if it does not find the exact codec and subsystem IDs.
-
-## Installation
-
-The native driver is the recommended option. Install the headers for the
-kernel you are currently running, then build and install the module:
+Installation:
 
 ```bash
-git clone https://github.com/fxjosemi/Samsung-Galaxy-Book-12-Linux.git
-cd Samsung-Galaxy-Book-12-Linux
 ./kernel/build-module.sh
 sudo ./kernel/install-native.sh \
   "kernel/build/$(uname -r)/snd-hda-codec-alc269.ko"
 sudo reboot
 ```
 
-The build script downloads the matching kernel.org source when no source tree
-is supplied. See [INSTALL.md](INSTALL.md) for dependencies, verification,
-kernel updates and removal.
+See [INSTALL.md](INSTALL.md) for dependencies and kernel-update instructions.
+The older speaker-only userspace fallback remains available through
+`sudo ./install.sh`.
 
-There is also an older speaker-only userspace workaround:
+### AMOLED brightness
+
+Linux exposes a brightness slider on this machine but does not program the
+panel's private AMOLED controls. The brightness component follows the standard
+`intel_backlight` slider and sends the corresponding calibrated values over the
+internal eDP AUX channel.
+
+It verifies the Galaxy Book 12 DMI identity, the internal eDP connector and the
+Samsung Display `SDC a029` EDID before allowing any panel write. The full Linux
+slider is mapped to the stable panel range 40–101 because lower panel values
+are known to flicker.
+
+Build and perform the read-only check:
 
 ```bash
-sudo ./install.sh
+make -C brightness
+./brightness/galaxybook12-brightness check
 ```
 
-It is useful when building a kernel module is not possible, but it does not
-switch the headphone route. Installing the native module automatically disables
-this workaround so both implementations cannot write the codec at once.
+Install the service:
 
-## How it works
+```bash
+sudo ./brightness/install.sh
+```
 
-The firmware leaves two internal amplifiers uninitialized and describes the
-shared output pin `0x17` only as a fixed speaker. The patch adds a quirk for
-`144d:c14f`, initializes both amplifiers, uses mic pin `0x18` as the reliable
-jack detector, and switches the shared output between:
+The equivalent top-level command is `sudo ./install.sh brightness`.
+
+More details and manual testing commands are in
+[brightness/README.md](brightness/README.md).
+
+## Supported family
+
+The fixes are expected to cover the SM-W720 Wi-Fi and SM-W727 LTE families,
+including regional and carrier suffixes, as long as the component-specific
+hardware IDs match. Installers stop instead of forcing a fix onto unknown
+hardware.
+
+## How the audio fix works
+
+The firmware leaves two internal amplifiers uninitialized and describes shared
+output pin `0x17` only as a fixed speaker. The patch initializes both
+amplifiers, uses mic pin `0x18` as the reliable jack detector and switches the
+shared output between:
 
 ```text
 Speakers:    DAC 0x02 -> mixer 0x0c -> pin 0x17
 Headphones:  DAC 0x03 -> mixer 0x0d -> pin 0x17
 ```
 
-The amplifier and routing tables come from Aurélien Croc's GPL-2.0
+The audio and display register research is based on Aurélien Croc's GPL-2.0
 [Windows/QEMU trace work](https://github.com/Teetoow/SamsungGalaxyBook12).
-Technical notes are in [docs/hardware.md](docs/hardware.md).
 
 ## Contributing
 
-Reports from other SM-W720 and SM-W727 variants are welcome. Include the output
-of `userspace/collect-diagnostics.sh` and do not test vendor coefficient writes
-on a different subsystem ID.
+Reports from other SM-W720 and SM-W727 variants are welcome. Include the exact
+model, distribution, kernel version and the hardware IDs relevant to the
+component being tested. Do not bypass the safety checks on unrelated hardware.
 
 The project is licensed under GPL-2.0-only. See [LICENSE](LICENSE).

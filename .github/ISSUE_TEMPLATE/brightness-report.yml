@@ -1,0 +1,38 @@
+name: Galaxy Book 12 AMOLED brightness report
+description: Report panel brightness results on supported Galaxy Book 12 hardware
+title: "[Brightness]: "
+labels:
+  - brightness
+body:
+  - type: checkboxes
+    attributes:
+      label: Hardware confirmation
+      options:
+        - label: The `check` command reports a Samsung Galaxy Book 12 with an SDC a029 panel.
+          required: true
+  - type: input
+    attributes:
+      label: Samsung model
+      placeholder: SM-W720 or SM-W727, including the regional suffix
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Distribution and kernel
+      placeholder: Distribution name and output of uname -r
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Test results
+      description: Describe slider range, cold boot, suspend/resume, flicker and color behavior.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Service status
+      description: Paste the reviewed output of systemctl status galaxybook12-brightness.service.
+  - type: textarea
+    attributes:
+      label: Additional context
+      description: Include the brightness level at which the issue occurs.

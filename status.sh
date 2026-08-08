@@ -1,39 +1,37 @@
 #!/bin/bash
-set -euo pipefail
+set -u
 
-expected_vendor="0x10ec0298"
-expected_subsystem="0x144dc14f"
-product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
+product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || printf unknown)"
 codec="not found"
 
 for node in /sys/class/sound/hwC*D*; do
     [ -r "$node/vendor_id" ] || continue
     vendor="$(cat "$node/vendor_id")"
     subsystem="$(cat "$node/subsystem_id")"
-    if [ "$vendor" = "$expected_vendor" ] && \
-       [ "$subsystem" = "$expected_subsystem" ]; then
+    if [ "$vendor" = "0x10ec0298" ] && [ "$subsystem" = "0x144dc14f" ]; then
         codec="$(basename "$node") ($vendor/$subsystem)"
         break
     fi
 done
 
-init_result="$(systemctl show alc298-book12-init.service -P Result 2>/dev/null || true)"
-control_state="missing"
-[ -x /usr/local/libexec/alc298-book12-control ] && control_state="installed"
+audio_module="$(modinfo -n snd_hda_codec_alc269 2>/dev/null || printf unavailable)"
+audio_userspace="$(systemctl is-enabled alc298-book12-init.service 2>/dev/null || true)"
+brightness_service="$(systemctl is-active galaxybook12-brightness.service 2>/dev/null || true)"
+brightness_program="missing"
+[ -x /usr/local/sbin/galaxybook12-brightness ] && brightness_program="installed"
 
-printf 'DMI product: %s\n' "${product:-unknown}"
-printf 'Codec: %s\n' "$codec"
-printf 'Control program: %s\n' "$control_state"
-printf 'Last initialization result: %s\n' "${init_result:-unknown}"
+printf 'System\n'
+printf '  DMI product: %s\n' "$product"
+printf '\nAudio\n'
+printf '  Codec: %s\n' "$codec"
+printf '  Realtek module: %s\n' "$audio_module"
+printf '  Userspace fallback: %s\n' "${audio_userspace:-not installed}"
+printf '\nAMOLED brightness\n'
+printf '  Control program: %s\n' "$brightness_program"
+printf '  Service: %s\n' "${brightness_service:-not installed}"
 
-if [ "$product" != "Galaxy Book 12" ] || [ "$codec" = "not found" ]; then
-    printf 'Result: unsupported or codec not ready\n' >&2
-    exit 1
+if [ -x /usr/local/sbin/galaxybook12-brightness ]; then
+    /usr/local/sbin/galaxybook12-brightness check 2>&1 | sed 's/^/  /'
+elif [ -x "$(dirname "$0")/brightness/galaxybook12-brightness" ]; then
+    "$(dirname "$0")/brightness/galaxybook12-brightness" check 2>&1 | sed 's/^/  /'
 fi
-
-if [ "$control_state" != "installed" ] || [ "$init_result" != "success" ]; then
-    printf 'Result: hardware found, but speaker initialization is not healthy\n' >&2
-    exit 1
-fi
-
-printf 'Result: userspace speaker fix is installed and initialized\n'
