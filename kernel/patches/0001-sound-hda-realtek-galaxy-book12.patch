@@ -1,6 +1,6 @@
 --- a/sound/hda/codecs/realtek/alc269.c
 +++ b/sound/hda/codecs/realtek/alc269.c
-@@ -1757,6 +1757,210 @@
+@@ -1757,6 +1757,272 @@
  	alc_fixup_hp_gpio_led(codec, action, 0x00, 0x01);
  }
  
@@ -138,6 +138,59 @@
 +	alc298_book12_write_table(codec, route, count);
 +}
 +
++static int alc298_book12_master_volume_put(struct snd_kcontrol *kcontrol,
++					   struct snd_ctl_elem_value *ucontrol)
++{
++	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
++	long *value = ucontrol->value.integer.value;
++	int change, err;
++
++	change = snd_hda_mixer_amp_volume_put(kcontrol, ucontrol);
++	if (change < 0)
++		return change;
++
++	err = snd_hda_codec_amp_update(codec, 0x03, 0, HDA_OUTPUT, 0,
++				       HDA_AMP_VOLMASK, value[0]);
++	if (err < 0)
++		return err;
++	change |= err;
++	err = snd_hda_codec_amp_update(codec, 0x03, 1, HDA_OUTPUT, 0,
++				       HDA_AMP_VOLMASK, value[1]);
++	if (err < 0)
++		return err;
++
++	return change | err;
++}
++
++static void alc298_book12_share_master_volume(struct hda_codec *codec)
++{
++	struct alc_spec *spec = codec->spec;
++	struct snd_kcontrol_new *kctl = spec->gen.kctls.list;
++	int i;
++
++	for (i = 0; i < spec->gen.kctls.used; i++) {
++		if (!strcmp(kctl[i].name, "Master Playback Volume") &&
++		    kctl[i].put == snd_hda_mixer_amp_volume_put) {
++			kctl[i].put = alc298_book12_master_volume_put;
++			return;
++		}
++	}
++
++	codec_warn(codec, "Galaxy Book 12: Master volume control not found\n");
++}
++
++static void alc298_book12_sync_headphone_volume(struct hda_codec *codec)
++{
++	int left, right;
++
++	left = snd_hda_codec_amp_read(codec, 0x02, 0, HDA_OUTPUT, 0);
++	right = snd_hda_codec_amp_read(codec, 0x02, 1, HDA_OUTPUT, 0);
++	snd_hda_codec_amp_update(codec, 0x03, 0, HDA_OUTPUT, 0,
++				 HDA_AMP_VOLMASK, left & HDA_AMP_VOLMASK);
++	snd_hda_codec_amp_update(codec, 0x03, 1, HDA_OUTPUT, 0,
++				 HDA_AMP_VOLMASK, right & HDA_AMP_VOLMASK);
++}
++
 +static void alc298_book12_switch_output(struct hda_codec *codec)
 +{
 +	bool headphones;
@@ -153,7 +206,12 @@
 +				 HDA_AMP_MUTE, HDA_AMP_MUTE);
 +	snd_hda_codec_amp_update(codec, 0x17, 1, HDA_OUTPUT, 0,
 +				 HDA_AMP_MUTE, HDA_AMP_MUTE);
++	snd_hda_set_pin_ctl(codec, 0x17, 0);
 +	alc298_book12_set_route(codec, headphones);
++	snd_hda_codec_write_cache(codec, 0x17, 0, AC_VERB_SET_CONNECT_SEL,
++				  headphones ? 1 : 0);
++	snd_hda_set_pin_ctl_cache(codec, 0x17, headphones ? PIN_HP : PIN_OUT);
++	usleep_range(10000, 12000);
 +	snd_hda_codec_amp_update(codec, 0x17, 0, HDA_OUTPUT, 0,
 +				 HDA_AMP_MUTE, left & HDA_AMP_MUTE);
 +	snd_hda_codec_amp_update(codec, 0x17, 1, HDA_OUTPUT, 0,
@@ -173,6 +231,7 @@
 +					       const struct hda_fixup *fix,
 +					       int action)
 +{
++	struct alc_spec *spec = codec->spec;
 +	struct hda_jack_callback *cb;
 +	hda_jack_callback_fn cb_func = alc298_book12_jack_callback;
 +	unsigned int left, right;
@@ -180,6 +239,8 @@
 +
 +	switch (action) {
 +	case HDA_FIXUP_ACT_PROBE:
++		spec->gen.multiout.hp_nid = 0x03;
++		alc298_book12_share_master_volume(codec);
 +		cb = snd_hda_jack_detect_enable_callback(codec, 0x18, cb_func);
 +		if (IS_ERR(cb))
 +			codec_warn(codec, "Galaxy Book 12: jack callback failed\n");
@@ -197,6 +258,7 @@
 +		alc_write_coef_idx(codec, 0x22, 0x1b);
 +		alc298_book12_write_table(codec, alc298_book12_dsp,
 +					  ARRAY_SIZE(alc298_book12_dsp));
++		alc298_book12_sync_headphone_volume(codec);
 +		headphones = snd_hda_jack_detect_state(codec, 0x18) ==
 +			HDA_JACK_PRESENT;
 +		alc298_book12_set_route(codec, headphones);
@@ -211,7 +273,7 @@
  static inline void alc298_samsung_write_coef_pack(struct hda_codec *codec,
  						  const unsigned short coefs[2])
  {
-@@ -4026,6 +4230,7 @@
+@@ -4026,6 +4292,7 @@
  	ALC236_FIXUP_HP_MUTE_LED,
  	ALC236_FIXUP_HP_MUTE_LED_MICMUTE_VREF,
  	ALC236_FIXUP_LENOVO_INV_DMIC,
@@ -219,7 +281,7 @@
  	ALC298_FIXUP_SAMSUNG_AMP,
  	ALC298_FIXUP_SAMSUNG_AMP_V2_2_AMPS,
  	ALC298_FIXUP_SAMSUNG_AMP_V2_4_AMPS,
-@@ -5745,6 +5950,10 @@
+@@ -5745,6 +6012,10 @@
  		.type = HDA_FIXUP_FUNC,
  		.v.func = alc295_fixup_hp_pavilion_mute_led_1b,
  	},
@@ -230,7 +292,7 @@
  	[ALC298_FIXUP_SAMSUNG_AMP] = {
  		.type = HDA_FIXUP_FUNC,
  		.v.func = alc298_fixup_samsung_amp,
-@@ -7514,6 +7723,8 @@
+@@ -7514,6 +7785,8 @@
  	SND_PCI_QUIRK(0x10f7, 0x8338, "Panasonic CF-SZ6", ALC269_FIXUP_ASPIRE_HEADSET_MIC),
  	SND_PCI_QUIRK(0x1414, 0x9c20, "Microsoft Surface Pro 2/3", ALC288_FIXUP_SURFACE_SWAP_DACS),
  	SND_PCI_QUIRK(0x144d, 0xc109, "Samsung Ativ book 9 (NP900X3G)", ALC269_FIXUP_INV_DMIC),

@@ -27,19 +27,25 @@ to `sound/hda/codecs/realtek/alc269.c`. It:
   signal on this tablet;
 - mutes shared output pin `0x17` while selecting the speaker or headphone
   vendor route;
+- mirrors the front stream to headphone DAC `0x03` and switches pin `0x17`
+  from speaker mixer `0x0c` to headphone mixer `0x0d`;
+- keeps the DAC `0x02` and DAC `0x03` hardware volume values synchronized;
 - reapplies initialization and the current route after codec resume.
 
-This first native test deliberately retains DAC `0x02` and mixer `0x0c` for
-both routes. That is the path on which the recovered headphone coefficients
-already produced correct, volume-controlled sound during hardware testing.
-Moving the jack to DAC `0x03` / mixer `0x0d` remains a later experiment because
-it would also require integrating DAC `0x03` with ALSA's playback volume.
+During route changes the shared pin is muted and temporarily disabled before
+its connection selector and pin mode change. This sequencing is intended to
+reduce the insertion transient without adding a userspace delay.
 
 ## Build result on the test tablet
 
-The patch has been compiled against Linux `7.1.6-1-cachyos` with Clang 22 and
-`W=1`. The resulting module has matching vermagic. No live jack test has yet
-been recorded for this native version.
+The first native version was tested on real hardware. It selected headphones
+automatically and produced Windows-like audio, but retained a strong insertion
+click and extremely faint left-to-right crosstalk because it still used speaker
+DAC `0x02` and mixer `0x0c` for the jack.
+
+The current dedicated-DAC revision has been compiled against Linux
+`7.1.6-1-cachyos` with Clang 22 and `W=1`; its module has matching vermagic. It
+still requires a reboot and live hardware test.
 
 The local build used:
 
