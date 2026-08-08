@@ -24,7 +24,8 @@ install -Dm0644 "$SCRIPT_DIR/galaxybook12-brightness.service" \
     /etc/systemd/system/galaxybook12-brightness.service
 
 systemctl daemon-reload
-systemctl enable --now galaxybook12-brightness.service
+systemctl enable galaxybook12-brightness.service
+systemctl restart galaxybook12-brightness.service
 
 printf 'AMOLED brightness service installed and started.\n'
 printf 'Check it with: systemctl status galaxybook12-brightness.service\n'

@@ -44,9 +44,10 @@ panel's private AMOLED controls. The brightness component follows the standard
 internal eDP AUX channel.
 
 It verifies the Galaxy Book 12 DMI identity, the internal eDP connector and the
-Samsung Display `SDC a029` EDID before allowing any panel write. The full Linux
-slider is mapped to the stable panel range 40–101 because lower panel values
-are known to flicker.
+Samsung Display `SDC a029` EDID before allowing any panel write. By default the
+full Linux slider is mapped to panel levels 10–101 with a short fade between
+levels. The minimum was tested on the development SM-W720; the original
+reverse-engineering work warned that some panels may flicker below 40.
 
 Build and perform the read-only check:
 

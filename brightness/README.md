@@ -37,10 +37,19 @@ Then try a lower stable value:
 sudo ./brightness/galaxybook12-brightness set 70
 ```
 
-Values below 40 are deliberately unavailable. The reference implementation
-showed visible flicker in that range. The service maps the complete desktop
-slider onto panel levels 40 through 101, so the brightness keys retain their
-full travel without entering the unstable range.
+The default service maps the complete desktop slider onto panel levels 10
+through 101 and moves between levels with a short fade. Level 10 was visually
+tested on the development SM-W720. The reference implementation warned about
+visible flicker below 40, so individual panels should still be checked with a
+camera and by eye.
+
+```bash
+sudo ./brightness/galaxybook12-brightness set 30
+```
+
+The watcher accepts a custom minimum as its second optional argument. For
+example, `watch 3 20` maps the desktop slider to panel levels 20–101. Levels
+1–9 remain available for manual experiments but are not enabled by default.
 
 ## Install
 

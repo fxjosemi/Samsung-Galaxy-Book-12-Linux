@@ -6,6 +6,10 @@
   compatibility repository.
 - Add guarded AMOLED brightness control, eDP AUX discovery, a systemd service
   and suspend recovery.
+- Keep the default stable brightness floor while allowing lower experimental
+  levels to be tested and configured explicitly.
+- Set the tested default minimum to 10 and add smooth single-level brightness
+  transitions in both directions.
 - Add an exact-match ALC298 speaker amplifier initializer for Samsung
   Galaxy Book 12 (`144d:c14f`).
 - Add udev-triggered startup and suspend/resume restoration.

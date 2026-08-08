@@ -28,8 +28,11 @@
 #define DMI_PRODUCT_PATH "/sys/class/dmi/id/product_name"
 #define BACKLIGHT_PATH "/sys/class/backlight/intel_backlight"
 #define AUX_CLASS_GLOB "/sys/class/drm_dp_aux_dev/drm_dp_aux*"
-#define PANEL_MIN 40
+#define PANEL_ABSOLUTE_MIN 1
+#define PANEL_DEFAULT_MIN 10
+#define PANEL_REFERENCE_SAFE_MIN 40
 #define PANEL_MAX 101
+#define FADE_STEP 1
 
 static volatile sig_atomic_t running = 1;
 
@@ -201,17 +204,17 @@ static int apply_level(aux_t aux, displayBrightness_t *display,
     return 0;
 }
 
-static int mapped_level(long brightness, long maximum)
+static int mapped_level(long brightness, long maximum, int minimum)
 {
     if (brightness < 0)
         brightness = 0;
     if (brightness > maximum)
         brightness = maximum;
-    return PANEL_MIN + (int)((brightness * (PANEL_MAX - PANEL_MIN) +
-                              maximum / 2) / maximum);
+    return minimum + (int)((brightness * (PANEL_MAX - minimum) +
+                            maximum / 2) / maximum);
 }
 
-static int watch_brightness(const char *aux_path, int profile)
+static int watch_brightness(const char *aux_path, int profile, int minimum)
 {
     char brightness_path[PATH_MAX];
     char maximum_path[PATH_MAX];
@@ -220,7 +223,8 @@ static int watch_brightness(const char *aux_path, int profile)
     long maximum;
     int previous = -1;
     bool set_profile = true;
-    struct timespec pause = {.tv_sec = 0, .tv_nsec = 200000000};
+    struct timespec idle_pause = {.tv_sec = 0, .tv_nsec = 100000000};
+    struct timespec fade_pause = {.tv_sec = 0, .tv_nsec = 5000000};
     struct timespec previous_time;
 
     snprintf(brightness_path, sizeof(brightness_path), "%s/brightness",
@@ -236,6 +240,7 @@ static int watch_brightness(const char *aux_path, int profile)
     while (running) {
         long brightness;
         int level;
+        int target;
         struct timespec current_time;
 
         clock_gettime(CLOCK_BOOTTIME, &current_time);
@@ -258,7 +263,12 @@ static int watch_brightness(const char *aux_path, int profile)
             fprintf(stderr, "Cannot read %s.\n", brightness_path);
             break;
         }
-        level = mapped_level(brightness, maximum);
+        target = mapped_level(brightness, maximum, minimum);
+        level = target;
+        if (previous >= 0 && target > previous + FADE_STEP)
+            level = previous + FADE_STEP;
+        else if (previous >= 0 && target < previous - FADE_STEP)
+            level = previous - FADE_STEP;
         if (level != previous || set_profile) {
             if (apply_level(aux, display, level, profile, set_profile) < 0) {
                 free(display);
@@ -273,7 +283,7 @@ static int watch_brightness(const char *aux_path, int profile)
             previous = level;
             set_profile = false;
         }
-        nanosleep(&pause, NULL);
+        nanosleep(level == target ? &idle_pause : &fade_pause, NULL);
     }
     free(display);
     dpAuxClose(aux);
@@ -298,8 +308,9 @@ static void usage(const char *program)
     fprintf(stderr,
         "Usage:\n"
         "  %s check\n"
-        "  %s set <40..101> [profile 0..6]\n"
-        "  %s watch [profile 0..6]\n", program, program, program);
+        "  %s set <1..101> [profile 0..6]\n"
+        "  %s watch [profile 0..6] [minimum 1..40]\n",
+        program, program, program);
 }
 
 int main(int argc, char **argv)
@@ -307,6 +318,7 @@ int main(int argc, char **argv)
     char aux_path[PATH_MAX];
     char connector[PATH_MAX];
     int profile = 3;
+    int minimum = PANEL_DEFAULT_MIN;
 
     if (argc < 2 || argc > 4) {
         usage(argv[0]);
@@ -321,7 +333,9 @@ int main(int argc, char **argv)
         printf("Panel: SDC a029 AMOLED\n");
         printf("Connector: %s\n", connector);
         printf("AUX device: %s\n", aux_path);
-        printf("Stable panel range: %d..%d\n", PANEL_MIN, PANEL_MAX);
+        printf("Default panel range: %d..%d\n", PANEL_DEFAULT_MIN, PANEL_MAX);
+        printf("Reference flicker warning: below %d\n",
+               PANEL_REFERENCE_SAFE_MIN);
         return 0;
     }
     if (!strcmp(argv[1], "watch")) {
@@ -329,11 +343,15 @@ int main(int argc, char **argv)
             usage(argv[0]);
             return 2;
         }
-        if (argc > 3) {
+        if (argc == 4 &&
+            (parse_range(argv[2], 0, 6, &profile) < 0 ||
+             parse_range(argv[3], PANEL_ABSOLUTE_MIN,
+                         PANEL_REFERENCE_SAFE_MIN,
+                         &minimum) < 0)) {
             usage(argv[0]);
             return 2;
         }
-        return watch_brightness(aux_path, profile);
+        return watch_brightness(aux_path, profile, minimum);
     }
     if (!strcmp(argv[1], "set")) {
         int level;
@@ -342,7 +360,7 @@ int main(int argc, char **argv)
         int result;
 
         if ((argc != 3 && argc != 4) ||
-            parse_range(argv[2], PANEL_MIN, PANEL_MAX, &level) < 0 ||
+            parse_range(argv[2], PANEL_ABSOLUTE_MIN, PANEL_MAX, &level) < 0 ||
             (argc == 4 && parse_range(argv[3], 0, 6, &profile) < 0)) {
             usage(argv[0]);
             return 2;
@@ -351,6 +369,10 @@ int main(int argc, char **argv)
             fprintf(stderr, "The set command must run as root.\n");
             return 1;
         }
+        if (level < PANEL_REFERENCE_SAFE_MIN)
+            fprintf(stderr,
+                    "Warning: levels below %d may flicker on this panel.\n",
+                    PANEL_REFERENCE_SAFE_MIN);
         if (open_panel(aux_path, &aux, &display) < 0)
             return 1;
         result = apply_level(aux, display, level, profile, true);

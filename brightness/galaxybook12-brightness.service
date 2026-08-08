@@ -6,7 +6,7 @@ ConditionPathExists=/sys/class/backlight/intel_backlight
 
 [Service]
 Type=simple
-ExecStart=/usr/local/sbin/galaxybook12-brightness watch 3
+ExecStart=/usr/local/sbin/galaxybook12-brightness watch 3 10
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=yes
