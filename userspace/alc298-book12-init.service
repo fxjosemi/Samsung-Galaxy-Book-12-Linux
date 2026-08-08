@@ -1,0 +1,7 @@
+[Unit]
+Description=Initialize ALC298 speaker amplifiers on Samsung Galaxy Book 12
+Documentation=https://github.com/Teetoow/SamsungGalaxyBook12
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/alc298-book12-control full --apply

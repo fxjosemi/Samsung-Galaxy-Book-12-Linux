@@ -1,0 +1,38 @@
+name: Galaxy Book 12 audio report
+description: Report results from the exact ALC298 hardware
+title: "[Audio]: "
+labels:
+  - audio
+body:
+  - type: checkboxes
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I verified codec subsystem ID `0x144dc14f` before applying writes.
+          required: true
+  - type: input
+    attributes:
+      label: Samsung model and board
+      placeholder: Galaxy Book 12 / SM-W720...
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Distribution and kernel
+      placeholder: CachyOS, Linux 7.1.6-1-cachyos
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Test results
+      description: Describe cold boot, left/right speakers, suspend/resume, and volume behavior.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Diagnostics
+      description: Attach reviewed output from userspace/collect-diagnostics.sh.
+  - type: textarea
+    attributes:
+      label: Additional context
+      description: State whether playback was active and which physical output produced any noise.

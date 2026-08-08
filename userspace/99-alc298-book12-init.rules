@@ -1,0 +1,2 @@
+# Start only after the exact Galaxy Book 12 codec device exists.
+ACTION=="add", SUBSYSTEM=="sound", KERNEL=="hwC?D?", ATTR{vendor_id}=="0x10ec0298", ATTR{subsystem_id}=="0x144dc14f", TAG+="systemd", ENV{SYSTEMD_WANTS}+="alc298-book12-init.service"
