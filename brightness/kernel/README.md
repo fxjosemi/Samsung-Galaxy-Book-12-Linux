@@ -17,10 +17,14 @@ original PWM backlight implementation.
 ## Current status
 
 The first patch is based on Linux 7.1.6 and builds cleanly as a complete
-`i915.ko` with Clang and `W=1`. The fixed-point conversion was compared against
-the original floating-point implementation using the development panel's live
-calibration: all 2,178 bytes were checked and the largest rounding difference
-was one register unit.
+`i915.ko` with Clang and `W=1`. It has booted successfully on the development
+SM-W720: `i915` detects the AMOLED implementation, the standard slider exposes
+levels 10–101 and changes the panel brightness correctly without the userspace
+service.
+
+The fixed-point conversion was compared against the original floating-point
+implementation using the development panel's live calibration: all 2,178 bytes
+were checked and the largest rounding difference was one register unit.
 
 The userspace implementation remains the tested fallback. Keep a second kernel
 installed until the native module has passed boot, brightness and suspend tests.

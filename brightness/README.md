@@ -7,8 +7,8 @@ the panel's private registers over the eDP AUX channel.
 There are now two implementations:
 
 - the userspace service documented below, which is the tested fallback;
-- an experimental native `i915` patch under [`kernel/`](kernel/README.md),
-  which needs no watcher or fade.
+- a native `i915` patch under [`kernel/`](kernel/README.md), which needs no
+  watcher or fade and has been tested on the development SM-W720.
 
 It only runs when all of these match:
 

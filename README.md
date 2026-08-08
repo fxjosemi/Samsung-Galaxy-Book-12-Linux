@@ -64,9 +64,10 @@ sudo ./brightness/install.sh
 
 The equivalent top-level command is `sudo ./install.sh brightness`.
 
-An experimental native `i915` implementation is also included. It reads the
-same factory calibration inside the driver, exposes levels 10–101 directly and
-does not use a service or fade:
+A native `i915` implementation is also included. It reads the same factory
+calibration inside the driver, exposes levels 10–101 directly and does not use
+a service or fade. It has been tested on the development SM-W720 with Linux
+7.1.6:
 
 ```bash
 ./brightness/kernel/build-module.sh
