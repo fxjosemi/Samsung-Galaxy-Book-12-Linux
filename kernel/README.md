@@ -51,9 +51,17 @@ correctly, but the insertion click remained because pin `0x17` and EAPD stayed
 enabled while ALSA reported the PCM as closed and PipeWire reported the sink as
 suspended.
 
-The current idle-power revision has been compiled against Linux
-`7.1.6-1-cachyos` with Clang 22 and `W=1`; its module has matching vermagic. It
-still requires a reboot and live hardware test.
+The idle-power revision was also tested. The insertion click remained with all
+of the following conditions verified simultaneously: PCM closed, pin `0x17`
+disabled, EAPD disabled, mic pin `0x18` at `VREF_HIZ`, and the codec runtime
+suspended. Its pitch changed slightly during full codec suspension, but its
+level did not materially improve.
+
+The recovered Windows-derived repository contains only the five vendor route
+writes used here and no additional depop sequence. Further blind changes to
+undocumented coefficients are therefore not considered safe. The insertion
+transient is retained as a known hardware limitation; automatic routing,
+dedicated headphone DAC, channel separation and volume control work correctly.
 
 The local build used:
 
