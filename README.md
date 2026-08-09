@@ -7,6 +7,22 @@ share the same board hardware.
 Each component has its own hardware checks, installer and removal procedure.
 You can install only the fixes you need.
 
+## Supported Linux platform
+
+This repository targets **CachyOS only**. The complete set of fixes is
+developed and validated on the project SM-W720 with:
+
+- CachyOS rolling, x86-64-v3;
+- Linux `7.1.6-1-cachyos` with the matching CachyOS headers;
+- GNOME/Mutter `50.4`;
+- libcamera `0.7.2`; and
+- PipeWire `1.6.8`.
+
+The external kernel modules must be rebuilt for the exact kernel shown by
+`uname -r`, and the patched libcamera, Mutter and OBS components follow the
+Arch/CachyOS packaging layout. Other distributions, including Ubuntu, are not
+currently supported and may require source, packaging and installer changes.
+
 ## Current fixes
 
 ### ALC298 audio
