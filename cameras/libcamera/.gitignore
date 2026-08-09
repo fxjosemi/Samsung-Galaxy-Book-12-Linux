@@ -1,0 +1,5 @@
+/libcamera/
+/pkg/
+/src/
+/*.pkg.tar.*
+/*.log

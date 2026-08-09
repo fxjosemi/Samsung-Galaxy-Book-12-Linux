@@ -50,3 +50,6 @@ printf '\nOrientation sensor\n'
 printf '  IIO device: %s\n' "$sensor_name"
 printf '  ST I2C module: %s\n' "$sensor_module"
 printf '  Sensor proxy: %s\n' "${sensor_proxy:-not installed}"
+
+printf '\nCameras\n'
+"$(dirname "$0")/cameras/status.sh" | sed '1,2d; s/^/  /'

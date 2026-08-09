@@ -106,6 +106,24 @@ upstream session-start fix on this device; a reproducible native Arch/CachyOS
 package is included.  See [sensors/README.md](sensors/README.md) for diagnosis,
 installation and removal instructions.
 
+### Cameras
+
+The tablet has Intel IPU3, a rear Sony IMX258 (`SONY258A`) and a front Sony
+IMX241 (`INT347F`). The rear sensor needs a 26 MHz clock table, an IPU bridge
+entry, Samsung-specific power/reset handling and a DW9806B autofocus driver. A
+native, reversible four-module override is included:
+
+```bash
+./cameras/kernel/build-module.sh
+sudo ./cameras/kernel/install.sh \
+  "cameras/kernel/build/$(uname -r)/imx258.ko"
+sudo reboot
+```
+
+The front sensor is detected but does not yet have a mainline Linux driver.
+See [cameras/README.md](cameras/README.md) for the verified hardware findings,
+libcamera packages, status checks and current limitation.
+
 ## Supported family
 
 The fixes are expected to cover the SM-W720 Wi-Fi and SM-W727 LTE families,
