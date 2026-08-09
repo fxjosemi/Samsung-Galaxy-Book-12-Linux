@@ -3,8 +3,8 @@
 pkgbase=libcamera
 pkgname=(libcamera libcamera-ipa)
 pkgver=0.7.2
-pkgrel=3.6
-pkgdesc="A complex camera support library for Linux, patched for Galaxy Book 12 autofocus"
+pkgrel=3.9
+pkgdesc="A complex camera support library for Linux, patched for Galaxy Book 12 cameras"
 arch=(x86_64)
 url="https://libcamera.org/"
 license=(
@@ -33,12 +33,14 @@ source=(
   0001-ipu3-stabilize-autofocus.patch
   0002-ipu3-advertise-full-video-resolutions.patch
   0003-ipu3-avoid-bds-height-underflow.patch
+  0004-libipa-add-imx241-sensor-helper.patch
 )
 sha256sums=(
   SKIP
   e23b07b733942840ad624754a443b04f58285ca180759a5b7651153f279fe2f7
-  aa3410357a9589842d97964e3977aeb317ec3911028601510412f4abf564413e
+  1019c886c064b528769c16581a894585eb6b11b75cca67815f055995fb3508e7
   7b76f432956331cfd4403e1a0a1a8c4be0cbddba6bf737e77e336de99c01b69e
+  cdf22e33a20a8b799debb2c7234c29aea30a71b0cdf4bc06f09cfe7a809b4523
 )
 
 _pick() {
@@ -56,6 +58,7 @@ prepare() {
   patch -d libcamera -Np1 -i "$srcdir/0001-ipu3-stabilize-autofocus.patch"
   patch -d libcamera -Np1 -i "$srcdir/0002-ipu3-advertise-full-video-resolutions.patch"
   patch -d libcamera -Np1 -i "$srcdir/0003-ipu3-avoid-bds-height-underflow.patch"
+  patch -d libcamera -Np1 -i "$srcdir/0004-libipa-add-imx241-sensor-helper.patch"
 }
 
 build() {

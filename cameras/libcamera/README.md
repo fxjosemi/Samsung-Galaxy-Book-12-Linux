@@ -1,7 +1,9 @@
 # Galaxy Book 12 IPU3 autofocus patch
 
-This directory builds a matched `libcamera` and `libcamera-ipa` pair for the
-Galaxy Book 12 rear IMX258 camera. They must be installed together because the
+This directory builds a matched `libcamera` and `libcamera-ipa` pair for both
+Galaxy Book 12 cameras. It includes the IMX241 gain helper required by the IPU3
+IPA, plus the rear-camera autofocus and video-mode fixes. The packages must be
+installed together because the
 IPA signature is verified with a public key embedded in `libcamera`.
 
 The patch changes the IPU3 autofocus implementation to:
@@ -15,7 +17,8 @@ The patch changes the IPU3 autofocus implementation to:
 - measure a fresh stable baseline after the final lens movement;
 - debounce loss of focus before starting another scan; and
 - avoid sending the same focus command to the DW9806B on every frame;
-- advertise validated discrete viewfinder/video modes through `3840x2160`
+- advertise validated discrete 16:9 and 4:3 viewfinder/video modes through
+  `4160x3104`;
 - prevent an IPU3 BDS height underflow when WebRTC negotiates small widescreen modes such as `640x360`
   while retaining `1280x720` as the low-overhead default.
 
@@ -23,8 +26,8 @@ Build and install:
 
 ```sh
 makepkg --cleanbuild --noconfirm
-sudo pacman -U ./libcamera-0.7.2-3.6-x86_64.pkg.tar.zst \
-  ./libcamera-ipa-0.7.2-3.6-x86_64.pkg.tar.zst
+sudo pacman -U ./libcamera-0.7.2-3.9-x86_64.pkg.tar.zst \
+  ./libcamera-ipa-0.7.2-3.9-x86_64.pkg.tar.zst
 systemctl --user restart wireplumber
 ```
 

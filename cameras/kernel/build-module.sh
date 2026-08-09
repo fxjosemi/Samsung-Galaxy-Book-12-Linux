@@ -18,8 +18,10 @@ if [ ! -d "$HEADERS" ]; then
 	echo "ERROR: headers for $KERNEL_RELEASE are not installed" >&2
 	exit 1
 fi
-if [ ! -f "$SCRIPT_DIR/dw9806b.c" ]; then
-	echo "ERROR: missing DW9806B driver source" >&2
+if [ ! -f "$SCRIPT_DIR/dw9806b.c" ] || \
+   [ ! -f "$SCRIPT_DIR/imx241.c" ] || \
+   [ ! -f "$SCRIPT_DIR/imx241-regs.h" ]; then
+	echo "ERROR: missing camera driver source" >&2
 	exit 1
 fi
 for command in make patch modinfo; do
@@ -87,6 +89,7 @@ work_int3472="$work_dir/drivers/platform/x86/intel/int3472"
 mkdir -p "$work_media" "$work_bridge" "$work_int3472"
 cp "$sensor_source" "$work_media/imx258.c"
 cp "$SCRIPT_DIR/dw9806b.c" "$work_media/dw9806b.c"
+cp "$SCRIPT_DIR/imx241.c" "$SCRIPT_DIR/imx241-regs.h" "$work_media/"
 cp "$bridge_source" "$work_bridge/ipu-bridge.c"
 cp "$int3472_source_dir/discrete.c" \
 	"$int3472_source_dir/discrete_quirks.c" \
@@ -97,7 +100,7 @@ patch -d "$work_dir" -p1 < "$BRIDGE_PATCH_FILE"
 patch -d "$work_dir" -p1 < "$POWER_RAIL_PATCH_FILE"
 patch -d "$work_dir" -p1 < "$POWER_SEQUENCE_PATCH_FILE"
 patch -d "$work_dir" -p1 < "$ASYNC_PATCH_FILE"
-printf '%s\n' 'obj-m += imx258.o' 'obj-m += dw9806b.o' > "$work_media/Makefile"
+printf '%s\n' 'obj-m += imx258.o' 'obj-m += imx241.o' 'obj-m += dw9806b.o' > "$work_media/Makefile"
 printf '%s\n' \
 	'obj-m += ipu_bridge.o' \
 	'ipu_bridge-y := ipu-bridge.o' > "$work_bridge/Makefile"
@@ -121,21 +124,25 @@ make -C "$HEADERS" M="$work_int3472" modules -j"$JOBS" W=1 \
 
 output_dir="$SCRIPT_DIR/build/$KERNEL_RELEASE"
 output_module="$output_dir/imx258.ko"
+output_front="$output_dir/imx241.ko"
 output_vcm="$output_dir/dw9806b.ko"
 output_bridge="$output_dir/ipu-bridge.ko"
 output_int3472="$output_dir/intel_skl_int3472_discrete.ko"
 mkdir -p "$output_dir"
 install -m 644 "$work_media/imx258.ko" "$output_module"
+install -m 644 "$work_media/imx241.ko" "$output_front"
 install -m 644 "$work_media/dw9806b.ko" "$output_vcm"
 install -m 644 "$work_bridge/ipu_bridge.ko" "$output_bridge"
 install -m 644 "$work_int3472/intel_skl_int3472_discrete.ko" "$output_int3472"
 if command -v llvm-strip >/dev/null 2>&1; then
 	llvm-strip --strip-debug "$output_module"
+	llvm-strip --strip-debug "$output_front"
 	llvm-strip --strip-debug "$output_vcm"
 	llvm-strip --strip-debug "$output_bridge"
 	llvm-strip --strip-debug "$output_int3472"
 elif command -v strip >/dev/null 2>&1; then
 	strip --strip-debug "$output_module"
+	strip --strip-debug "$output_front"
 	strip --strip-debug "$output_vcm"
 	strip --strip-debug "$output_bridge"
 	strip --strip-debug "$output_int3472"
@@ -149,6 +156,17 @@ case "$(modinfo -F vermagic "$output_module")" in
 	"$KERNEL_RELEASE "*) ;;
 	*)
 		echo "ERROR: module vermagic does not match $KERNEL_RELEASE" >&2
+		exit 1
+		;;
+esac
+if [ "$(modinfo -F name "$output_front")" != "imx241" ]; then
+	echo "ERROR: the resulting front-camera module has an unexpected name" >&2
+	exit 1
+fi
+case "$(modinfo -F vermagic "$output_front")" in
+	"$KERNEL_RELEASE "*) ;;
+	*)
+		echo "ERROR: front-camera module vermagic does not match $KERNEL_RELEASE" >&2
 		exit 1
 		;;
 esac
@@ -186,5 +204,5 @@ case "$(modinfo -F vermagic "$output_int3472")" in
 		;;
 esac
 
-echo "Built modules: $output_module, $output_vcm, $output_bridge and $output_int3472"
+echo "Built modules: $output_module, $output_front, $output_vcm, $output_bridge and $output_int3472"
 echo "Install it with: sudo ./cameras/kernel/install.sh '$output_module'"

@@ -1,0 +1,50 @@
+diff --git a/plugins/linux-pipewire/pipewire.c b/plugins/linux-pipewire/pipewire.c
+index d312a18..d31ada5 100644
+--- a/plugins/linux-pipewire/pipewire.c
++++ b/plugins/linux-pipewire/pipewire.c
+@@ -686,12 +686,42 @@ static void process_video_async(obs_pipewire_stream *obs_pw_stream)
+ 		goto done;
+ 	}
+ 
+-	for (uint32_t i = 0; i < buffer->n_datas && i < MAX_AV_PLANES; i++) {
+-		out.data[i] = buffer->datas[i].data;
++	uint32_t planes = SPA_MIN(buffer->n_datas, MAX_AV_PLANES);
++	for (uint32_t i = 0; i < planes; i++) {
++		struct spa_data *data = &buffer->datas[i];
++		if (data->chunk == NULL) {
++			blog(LOG_ERROR, "[pipewire] Buffer plane has no chunk");
++			goto done;
++		}
++
++		out.data[i] = SPA_PTROFF(data->data, data->chunk->offset, uint8_t);
+ 		if (out.data[i] == NULL) {
+ 			blog(LOG_ERROR, "[pipewire] Failed to access data");
+ 			goto done;
+ 		}
++
++		if (data->chunk->stride != 0)
++			out.linesize[i] = data->chunk->stride > 0 ? data->chunk->stride : -data->chunk->stride;
++	}
++
++	/* libcamera commonly exposes NV12 as one contiguous MemPtr block. OBS
++	 * expects separate Y and interleaved UV pointers even in that case. */
++	if (out.format == VIDEO_FORMAT_NV12) {
++		if (planes == 1) {
++			const uint64_t y_size = (uint64_t)out.linesize[0] * out.height;
++			const uint64_t uv_size = (uint64_t)out.linesize[0] * ((out.height + 1) / 2);
++
++			if (buffer->datas[0].chunk->size < y_size + uv_size) {
++				blog(LOG_ERROR, "[pipewire] NV12 buffer is too small (%u < %" PRIu64 ")",
++				     buffer->datas[0].chunk->size, y_size + uv_size);
++				goto done;
++			}
++
++			out.data[1] = out.data[0] + y_size;
++			out.linesize[1] = out.linesize[0];
++		} else if (out.linesize[1] == 0) {
++			out.linesize[1] = out.linesize[0];
++		}
+ 	}
+ 
+ #ifdef DEBUG_PIPEWIRE
+

@@ -114,8 +114,9 @@ Windows control-logic driver names the legacy function codes as follows:
 Samsung also supplies private rear-camera on/off `_DSM` methods which manage a
 shared rail and the camera indicator. The patched IMX258 driver calls them only
 during the sensor's normal runtime power cycle and toggles reset in the proper
-order. The front `INT347F` device is IMX241; no upstream Linux driver currently
-claims that ACPI ID.
+order. The front `INT347F` device is IMX241. The project driver claims that ACPI
+ID, uses the matching `DSC1` runtime-power method and exposes the recovered
+2592x1944 and 1296x972 RAW10 modes to IPU3.
 
 The rear SSDB selects a Dongwoon DW9806B voice-coil autofocus actuator. Linux
 7.1 provides `dw9807-vcm` but no compatible `dw9806b` module. The project adds

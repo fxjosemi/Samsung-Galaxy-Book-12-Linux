@@ -109,17 +109,21 @@ installation and removal instructions.
 ### Cameras
 
 The tablet has Intel IPU3, a rear Sony IMX258 (`SONY258A`) and a front Sony
-IMX241 (`INT347F`). The rear sensor needs a 26 MHz clock table, an IPU bridge
-entry, Samsung-specific power/reset handling and a DW9806B autofocus driver.
+IMX241 (`INT347F`). The rear sensor needs a 26 MHz clock table and a DW9806B
+autofocus driver. Both sensors need IPU bridge entries and Samsung-specific
+power/reset handling. The project now includes a dedicated native V4L2 IMX241
+driver reconstructed from the official Samsung mode and platform data.
 The included camera stack provides:
 
+- native IPU3 media-graph detection for both front and rear cameras;
+- front-camera RAW10 modes at `2592x1944` and `1296x972`;
 - reliable rear-camera detection after a cold boot;
 - bounded contrast autofocus that stops at the best measured position;
-- validated video modes from `160x120` through `3840x2160`, with `1280x720`
+- validated 16:9 and 4:3 video modes from `160x120` through `4160x3104`, with `1280x720`
   as the default; and
 - safe PipeWire/WebRTC negotiation for Firefox and other portal clients.
 
-Build and install the native, reversible four-module kernel override:
+Build and install the native, reversible five-module kernel override:
 
 ```bash
 ./cameras/kernel/build-module.sh
@@ -135,8 +139,8 @@ together:
 ```bash
 cd cameras/libcamera
 makepkg --cleanbuild --noconfirm
-sudo pacman -U ./libcamera-0.7.2-3.6-x86_64.pkg.tar.zst \
-  ./libcamera-ipa-0.7.2-3.6-x86_64.pkg.tar.zst
+sudo pacman -U ./libcamera-0.7.2-3.9-x86_64.pkg.tar.zst \
+  ./libcamera-ipa-0.7.2-3.9-x86_64.pkg.tar.zst
 systemctl --user restart wireplumber
 ```
 
@@ -145,9 +149,15 @@ No second reboot is required for the userspace packages. Firefox must have
 capture resolution, and the GNOME Camera application may not display a manual
 resolution selector even though the modes are exposed.
 
-The front sensor is detected but does not yet have a mainline Linux driver.
-See [cameras/README.md](cameras/README.md) for the verified hardware findings,
-dependencies, status checks, rollback instructions and current limitation.
+OBS Studio 32.2.1 needs two additional PipeWire fixes to consume the discrete
+resolution list and contiguous IPU3 NV12 buffers without green frames or a
+crash. The patched module has been validated at `3840x2160` and 30 FPS. Build
+and installation instructions are in [cameras/obs/README.md](cameras/obs/README.md).
+
+The front driver is project-native rather than upstream, and becomes active on
+the same reboot as the kernel override. See
+[cameras/README.md](cameras/README.md) for the verified hardware findings,
+dependencies, status checks and rollback instructions.
 
 ## Supported family
 

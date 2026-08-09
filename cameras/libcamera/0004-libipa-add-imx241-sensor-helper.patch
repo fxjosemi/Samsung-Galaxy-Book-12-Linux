@@ -1,0 +1,51 @@
+diff --git a/src/ipa/libipa/camera_sensor_helper.cpp b/src/ipa/libipa/camera_sensor_helper.cpp
+index d26c72d93..8d6a017d1 100644
+--- a/src/ipa/libipa/camera_sensor_helper.cpp
++++ b/src/ipa/libipa/camera_sensor_helper.cpp
+@@ -543,6 +543,18 @@ public:
+ };
+ REGISTER_CAMERA_SENSOR_HELPER("imx214", CameraSensorHelperImx214)
+-
++
++class CameraSensorHelperImx241 : public CameraSensorHelper
++{
++public:
++	CameraSensorHelperImx241()
++	{
++		/* Sony 8-bit analogue gain: gain = 256 / (256 - code). */
++		blackLevel_ = 4096;
++		gain_ = AnalogueGainLinear{ 0, 256, -1, 256 };
++	}
++};
++REGISTER_CAMERA_SENSOR_HELPER("imx241", CameraSensorHelperImx241)
++
+ class CameraSensorHelperImx219 : public CameraSensorHelper
+ {
+ public:
+diff --git a/src/libcamera/sensor/camera_sensor_properties.cpp b/src/libcamera/sensor/camera_sensor_properties.cpp
+index 32ba15c53..759e02d11 100644
+--- a/src/libcamera/sensor/camera_sensor_properties.cpp
++++ b/src/libcamera/sensor/camera_sensor_properties.cpp
+@@ -210,6 +210,22 @@ const CameraSensorProperties *CameraSensorProperties::get(const std::string &sen
+ 				.hblankDelay = 2
+ 			},
+ 		} },
++		{ "imx241", {
++			.unitCellSize = { 1120, 1120 },
++			.testPatternModes = {
++				{ controls::draft::TestPatternModeOff, 0 },
++				{ controls::draft::TestPatternModeSolidColor, 1 },
++				{ controls::draft::TestPatternModeColorBars, 2 },
++				{ controls::draft::TestPatternModeColorBarsFadeToGray, 3 },
++				{ controls::draft::TestPatternModePn9, 4 },
++			},
++			.sensorDelays = {
++				.exposureDelay = 2,
++				.gainDelay = 1,
++				.vblankDelay = 2,
++				.hblankDelay = 2
++			},
++		} },
+ 		{ "imx258", {
+ 			.unitCellSize = { 1120, 1120 },
+ 			.testPatternModes = {

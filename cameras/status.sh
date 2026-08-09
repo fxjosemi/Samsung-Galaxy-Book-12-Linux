@@ -10,9 +10,17 @@ else
 	echo "Rear sensor:  not detected"
 fi
 if [ -e /sys/bus/acpi/devices/INT347F:00 ]; then
-	echo "Front sensor: Sony IMX241 (INT347F) detected; no upstream Linux driver"
+	echo "Front sensor: Sony IMX241 (INT347F) detected"
 else
 	echo "Front sensor: not detected"
+fi
+
+if [ -L /sys/bus/i2c/drivers/imx241/i2c-INT347F:00 ]; then
+	echo "Front driver: bound as a native V4L2 sensor"
+elif [ -e /sys/module/imx241 ]; then
+	echo "Front driver: loaded, but sensor not bound"
+else
+	echo "Front driver: not loaded"
 fi
 
 if [ -L /sys/bus/i2c/drivers/imx258/i2c-SONY258A:00 ]; then
@@ -62,10 +70,11 @@ fi
 
 override_dir="/usr/lib/modules/$(uname -r)/updates/galaxybook12-camera"
 if [ -f "$override_dir/imx258.ko" ] && \
+   [ -f "$override_dir/imx241.ko" ] && \
    [ -f "$override_dir/dw9806b.ko" ] && \
    [ -f "$override_dir/ipu-bridge.ko" ] && \
    [ -f "$override_dir/intel_skl_int3472_discrete.ko" ]; then
-	echo "Overrides:    all four rear-camera modules installed"
+	echo "Overrides:    all five camera modules installed"
 fi
 
 if command -v cam >/dev/null 2>&1; then
