@@ -3,6 +3,13 @@
 These instructions install the native Realtek driver fix. Commands are run from
 the repository root.
 
+For the complete supported setup, including every hardware fix and automatic
+kernel-update rebuilding, use the one-command installer instead:
+
+```bash
+./install.sh all
+```
+
 ## 1. Check the hardware
 
 The codec should report `0x10ec0298` and `0x144dc14f`:
@@ -91,9 +98,17 @@ channels separately. A short click during insertion is a known limitation.
 
 ## Kernel updates
 
-The module is built for one exact kernel release. After booting a new kernel,
-install its headers and repeat the build, install and reboot steps. The old
-module remains confined to the old kernel directory.
+The module is built for one exact kernel release. Enable the CachyOS update hook
+after a manual installation:
+
+```bash
+sudo ./install.sh updates
+```
+
+It rebuilds the installed native fixes after Pacman installs a new managed
+kernel and its matching headers. Wait for its success message before rebooting.
+See [updates/README.md](updates/README.md) for recovery behavior and manual
+rebuild commands.
 
 ## Removal
 

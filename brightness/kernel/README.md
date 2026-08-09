@@ -29,6 +29,10 @@ were checked and the largest rounding difference was one register unit.
 The userspace implementation remains the tested fallback. Keep a second kernel
 installed until the native module has passed boot, brightness and suspend tests.
 
+The global installer enables automatic rebuilding when the selected CachyOS
+kernel and headers change. After installing this module manually, run
+`sudo ./install.sh updates`; see [the update guide](../../updates/README.md).
+
 ## Build
 
 Install the compiler, kernel headers, `make`, `patch`, `curl`, `xz` and the

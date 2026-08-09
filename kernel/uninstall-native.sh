@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-KERNEL_RELEASE="$(uname -r)"
+KERNEL_RELEASE="${1:-$(uname -r)}"
 MODULE_DIR="/usr/lib/modules/$KERNEL_RELEASE/updates/alc298-book12"
 BACKUP_DIR="/var/lib/alc298-book12-native-backup"
 

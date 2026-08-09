@@ -1,0 +1,14 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/lib/modules/*/pkgbase
+Target = usr/lib/modules/*/build/Makefile
+
+[Action]
+Description = Rebuilding Samsung Galaxy Book 12 drivers for the new kernel...
+When = PostTransaction
+Depends = bash
+Depends = kmod
+Exec = /usr/local/libexec/galaxybook12-rebuild-kernels --pacman-targets
+NeedsTargets

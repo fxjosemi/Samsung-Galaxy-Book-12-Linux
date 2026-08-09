@@ -29,6 +29,11 @@ for name in /sys/bus/iio/devices/iio:device*/name; do
     fi
 done
 sensor_proxy="$(systemctl is-active iio-sensor-proxy.service 2>/dev/null || true)"
+update_hook="not installed"
+if [ -x /usr/local/libexec/galaxybook12-rebuild-kernels ] && \
+   [ -r /etc/pacman.d/hooks/95-galaxybook12-kernel.hook ]; then
+    update_hook="enabled"
+fi
 
 printf 'System\n'
 printf '  DMI product: %s\n' "$product"
@@ -50,6 +55,9 @@ printf '\nOrientation sensor\n'
 printf '  IIO device: %s\n' "$sensor_name"
 printf '  ST I2C module: %s\n' "$sensor_module"
 printf '  Sensor proxy: %s\n' "${sensor_proxy:-not installed}"
+
+printf '\nCachyOS updates\n'
+printf '  Automatic kernel rebuild: %s\n' "$update_hook"
 
 printf '\nCameras\n'
 "$(dirname "$0")/cameras/status.sh" | sed '1,2d; s/^/  /'

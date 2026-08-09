@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-KERNEL_RELEASE="$(uname -r)"
+KERNEL_RELEASE="${KERNEL_RELEASE:-$(uname -r)}"
 MODULE_SOURCE_DIR="${1:-}"
 MODULE_DIR="/usr/lib/modules/$KERNEL_RELEASE/updates/galaxybook12-sensor"
 STATE_DIR="/var/lib/galaxybook12-sensor/$KERNEL_RELEASE"
@@ -82,27 +82,21 @@ for module in "${MODULES[@]}"; do
 	esac
 done
 
-if [ -e "$STATE_DIR/installed" ]; then
-	echo "ERROR: the sensor modules are already installed for $KERNEL_RELEASE" >&2
-	echo "       uninstall them before installing another build" >&2
-	exit 1
-fi
-
 install -d -m 755 "$MODULE_DIR" "$STATE_DIR"
 for module in "${MODULES[@]}"; do
-	if [ -f "$MODULE_DIR/$module.ko" ]; then
+	if [ ! -e "$STATE_DIR/installed" ] && [ -f "$MODULE_DIR/$module.ko" ]; then
 		install -m 644 "$MODULE_DIR/$module.ko" "$STATE_DIR/previous-$module.ko"
 	fi
 	install -m 644 "$MODULE_SOURCE_DIR/$module.ko" "$MODULE_DIR/$module.ko"
 done
-if [ -f "$LOAD_FILE" ]; then
+if [ ! -e "$STATE_DIR/installed" ] && [ -f "$LOAD_FILE" ]; then
 	install -m 644 "$LOAD_FILE" "$STATE_DIR/previous-modules-load.conf"
 fi
 printf '%s\n' '# Samsung Galaxy Book 12 K2HH accelerometer' 'st_accel_i2c' > "$LOAD_FILE"
 
 depmod -a "$KERNEL_RELEASE"
 for module in "${MODULES[@]}"; do
-	selected="$(modinfo -n "$module")"
+	selected="$(modinfo -k "$KERNEL_RELEASE" -n "$module")"
 	if [ "$(readlink -f "$selected")" != "$(readlink -f "$MODULE_DIR/$module.ko")" ]; then
 		echo "ERROR: depmod selected an unexpected $module module: $selected" >&2
 		restore_failed_install
@@ -110,7 +104,7 @@ for module in "${MODULES[@]}"; do
 	fi
 done
 
-if ! rebuild_initramfs; then
+if [ "${SKIP_INITRAMFS:-0}" != 1 ] && ! rebuild_initramfs; then
 	echo "ERROR: initramfs rebuild failed; restoring the previous state" >&2
 	restore_failed_install
 	rebuild_initramfs || true

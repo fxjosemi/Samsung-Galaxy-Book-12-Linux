@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-KERNEL_RELEASE="$(uname -r)"
+KERNEL_RELEASE="${KERNEL_RELEASE:-$(uname -r)}"
 MODULE_SOURCE="${1:-}"
 BRIDGE_SOURCE="${2:-${MODULE_SOURCE%/*}/ipu-bridge.ko}"
 INT3472_SOURCE="${3:-${MODULE_SOURCE%/*}/intel_skl_int3472_discrete.ko}"
@@ -125,27 +125,27 @@ install -m 644 "$INT3472_SOURCE" "$INT3472_DEST"
 install -m 644 "$VCM_SOURCE" "$VCM_DEST"
 install -m 644 "$FRONT_SOURCE" "$FRONT_DEST"
 depmod -a "$KERNEL_RELEASE"
-selected="$(modinfo -n imx258)"
+selected="$(modinfo -k "$KERNEL_RELEASE" -n imx258)"
 if [ "$(readlink -f "$selected")" != "$(readlink -f "$MODULE_DEST")" ]; then
 	echo "ERROR: depmod selected an unexpected module: $selected" >&2
 	exit 1
 fi
-selected_bridge="$(modinfo -n ipu_bridge)"
+selected_bridge="$(modinfo -k "$KERNEL_RELEASE" -n ipu_bridge)"
 if [ "$(readlink -f "$selected_bridge")" != "$(readlink -f "$BRIDGE_DEST")" ]; then
 	echo "ERROR: depmod selected an unexpected bridge: $selected_bridge" >&2
 	exit 1
 fi
-selected_int3472="$(modinfo -n intel_skl_int3472_discrete)"
+selected_int3472="$(modinfo -k "$KERNEL_RELEASE" -n intel_skl_int3472_discrete)"
 if [ "$(readlink -f "$selected_int3472")" != "$(readlink -f "$INT3472_DEST")" ]; then
 	echo "ERROR: depmod selected an unexpected INT3472 module: $selected_int3472" >&2
 	exit 1
 fi
-selected_vcm="$(modinfo -n dw9806b)"
+selected_vcm="$(modinfo -k "$KERNEL_RELEASE" -n dw9806b)"
 if [ "$(readlink -f "$selected_vcm")" != "$(readlink -f "$VCM_DEST")" ]; then
 	echo "ERROR: depmod selected an unexpected autofocus module: $selected_vcm" >&2
 	exit 1
 fi
-selected_front="$(modinfo -n imx241)"
+selected_front="$(modinfo -k "$KERNEL_RELEASE" -n imx241)"
 if [ "$(readlink -f "$selected_front")" != "$(readlink -f "$FRONT_DEST")" ]; then
 	echo "ERROR: depmod selected an unexpected front-camera module: $selected_front" >&2
 	exit 1

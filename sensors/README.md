@@ -75,9 +75,9 @@ does not require a startup script or background service.
 
 ## Kernel updates and removal
 
-External modules are tied to one kernel release.  Rebuild and reinstall after
-each kernel update until the patch is included by the distribution or upstream
-kernel.
+External modules are tied to one kernel release. The global installer enables
+automatic CachyOS rebuilds; after a manual installation run
+`sudo ./install.sh updates`. See [the update guide](../updates/README.md).
 
 To remove the override:
 

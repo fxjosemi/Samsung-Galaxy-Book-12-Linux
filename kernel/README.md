@@ -16,6 +16,9 @@ sudo reboot
 ```
 
 See [../INSTALL.md](../INSTALL.md) for dependencies, verification and removal.
+After a manual installation, `sudo ./install.sh updates` enables automatic
+rebuilding on CachyOS kernel updates; see
+[the update guide](../updates/README.md).
 
 ## Driver changes
 

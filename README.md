@@ -7,6 +7,26 @@ share the same board hardware.
 Each component has its own hardware checks, installer and removal procedure.
 You can install only the fixes you need.
 
+## Install everything
+
+On the supported CachyOS installation, clone the repository and run this once
+as your normal user:
+
+```bash
+./install.sh all
+```
+
+The command requests `sudo` when needed, installs the matching build dependencies,
+builds and installs native audio, AMOLED brightness, orientation-sensor and
+front/rear-camera drivers, installs the matched libcamera/autofocus package and
+the validated Mutter rotation fix, and enables automatic rebuilding after
+future kernel updates. Reboot only when it finishes successfully.
+
+Keep a second kernel family such as `linux-cachyos-lts` installed. The automatic
+integration only follows the kernel family that was active during installation,
+so the second kernel remains an unmodified recovery option. See
+[updates/README.md](updates/README.md) for operation and recovery details.
+
 ## Supported Linux platform
 
 This repository targets **CachyOS only**. The complete set of fixes is
@@ -18,10 +38,11 @@ developed and validated on the project SM-W720 with:
 - libcamera `0.7.2`; and
 - PipeWire `1.6.8`.
 
-The external kernel modules must be rebuilt for the exact kernel shown by
-`uname -r`, and the patched libcamera, Mutter and OBS components follow the
-Arch/CachyOS packaging layout. Other distributions, including Ubuntu, are not
-currently supported and may require source, packaging and installer changes.
+The external kernel modules are rebuilt automatically for the selected CachyOS
+kernel family when its kernel and headers are updated. The patched libcamera,
+Mutter and OBS components follow the Arch/CachyOS packaging layout. Other
+distributions, including Ubuntu, are not currently supported and may require
+source, packaging and installer changes.
 
 ## Current fixes
 

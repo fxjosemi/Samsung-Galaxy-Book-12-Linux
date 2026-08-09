@@ -110,8 +110,11 @@ two-lane RAW10 transport, rather than selected experimentally.
 
 ## Kernel updates and rollback
 
-The modules are tied to the exact kernel release shown by `uname -r`. Rebuild,
-reinstall and reboot after each kernel update. The installer verifies the DMI
+The modules are tied to the exact kernel release shown by `uname -r`. The
+global installer enables the CachyOS Pacman hook that rebuilds them for a new
+managed kernel automatically. After a manual installation, enable it with
+`sudo ./install.sh updates`; see [the update guide](../updates/README.md).
+The installer verifies the DMI
 identity, sensor ACPI ID, module names and `vermagic` before copying anything.
 Rollback removes all five camera modules:
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-KERNEL_RELEASE="$(uname -r)"
+KERNEL_RELEASE="${KERNEL_RELEASE:-$(uname -r)}"
 MODULE_SOURCE="${1:-}"
 MODULE_DIR="/usr/lib/modules/$KERNEL_RELEASE/updates/galaxybook12-amoled"
 MODULE_DEST="$MODULE_DIR/i915.ko"
@@ -86,14 +86,8 @@ case "$(modinfo -F vermagic "$MODULE_SOURCE")" in
 		;;
 esac
 
-if [ -e "$STATE_DIR/installed" ]; then
-	echo "ERROR: the native AMOLED module is already installed for $KERNEL_RELEASE" >&2
-	echo "       uninstall it before installing another build" >&2
-	exit 1
-fi
-
 install -d -m 755 "$MODULE_DIR" "$STATE_DIR"
-if [ -f "$MODULE_DEST" ]; then
+if [ ! -e "$STATE_DIR/installed" ] && [ -f "$MODULE_DEST" ]; then
 	install -m 644 "$MODULE_DEST" "$STATE_DIR/previous-i915.ko"
 fi
 if systemctl is-enabled --quiet "$SERVICE" 2>/dev/null; then
@@ -106,14 +100,14 @@ systemctl disable --now "$SERVICE" >/dev/null 2>&1 || true
 
 install -m 644 "$MODULE_SOURCE" "$MODULE_DEST"
 depmod -a "$KERNEL_RELEASE"
-selected="$(modinfo -n i915)"
+selected="$(modinfo -k "$KERNEL_RELEASE" -n i915)"
 if [ "$(readlink -f "$selected")" != "$(readlink -f "$MODULE_DEST")" ]; then
 	echo "ERROR: depmod selected an unexpected module: $selected" >&2
 	restore_failed_install
 	exit 1
 fi
 
-if ! rebuild_initramfs; then
+if [ "${SKIP_INITRAMFS:-0}" != 1 ] && ! rebuild_initramfs; then
 	echo "ERROR: initramfs rebuild failed; restoring the previous state" >&2
 	restore_failed_install
 	rebuild_initramfs || true

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-KERNEL_RELEASE="$(uname -r)"
+KERNEL_RELEASE="${1:-$(uname -r)}"
 MODULE_DIR="/usr/lib/modules/$KERNEL_RELEASE/updates/galaxybook12-camera"
 MODULE_DEST="$MODULE_DIR/imx258.ko"
 BRIDGE_DEST="$MODULE_DIR/ipu-bridge.ko"

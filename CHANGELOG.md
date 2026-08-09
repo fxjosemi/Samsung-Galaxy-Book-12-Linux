@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add `./install.sh all` to install every validated Galaxy Book 12 fix in one
+  pass on CachyOS.
+- Add a Pacman hook that rebuilds enabled native modules for a newly updated
+  kernel with matching headers and regenerates the initramfs once.
+- Allow every native builder and installer to target a kernel other than the
+  currently running release, while preserving the original rollback modules
+  across repeated installations.
+- Keep a separate installed kernel family unmodified as a recovery option.
+
 - Expand the project from an audio-only fix into a Galaxy Book 12 Linux
   compatibility repository.
 - Add guarded AMOLED brightness control, eDP AUX discovery, a systemd service

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-KERNEL_RELEASE="$(uname -r)"
+KERNEL_RELEASE="${KERNEL_RELEASE:-$(uname -r)}"
 KERNEL_VERSION="${KERNEL_RELEASE%%-*}"
 HEADERS="/usr/lib/modules/$KERNEL_RELEASE/build"
 PATCH_FILE="$SCRIPT_DIR/patches/0001-drm-i915-add-Galaxy-Book-12-AMOLED-backlight-support.patch"

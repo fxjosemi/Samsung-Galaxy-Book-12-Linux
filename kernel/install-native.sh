@@ -3,7 +3,7 @@ set -euo pipefail
 
 CODEC_VENDOR_EXPECTED="0x10ec0298"
 CODEC_SUBSYSTEM_EXPECTED="0x144dc14f"
-KERNEL_RELEASE="$(uname -r)"
+KERNEL_RELEASE="${KERNEL_RELEASE:-$(uname -r)}"
 MODULE_SOURCE="${1:-}"
 MODULE_DIR="/usr/lib/modules/$KERNEL_RELEASE/updates/alc298-book12"
 MODULE_DEST="$MODULE_DIR/snd-hda-codec-alc269.ko"
@@ -66,7 +66,7 @@ systemctl daemon-reload
 udevadm control --reload-rules
 depmod -a "$KERNEL_RELEASE"
 
-selected="$(modinfo -n snd_hda_codec_alc269)"
+selected="$(modinfo -k "$KERNEL_RELEASE" -n snd_hda_codec_alc269)"
 if [ "$(readlink -f "$selected")" != "$(readlink -f "$MODULE_DEST")" ]; then
     echo "ERROR: depmod selected an unexpected module: $selected" >&2
     exit 1
