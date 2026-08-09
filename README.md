@@ -110,8 +110,16 @@ installation and removal instructions.
 
 The tablet has Intel IPU3, a rear Sony IMX258 (`SONY258A`) and a front Sony
 IMX241 (`INT347F`). The rear sensor needs a 26 MHz clock table, an IPU bridge
-entry, Samsung-specific power/reset handling and a DW9806B autofocus driver. A
-native, reversible four-module override is included:
+entry, Samsung-specific power/reset handling and a DW9806B autofocus driver.
+The included camera stack provides:
+
+- reliable rear-camera detection after a cold boot;
+- bounded contrast autofocus that stops at the best measured position;
+- validated video modes from `160x120` through `3840x2160`, with `1280x720`
+  as the default; and
+- safe PipeWire/WebRTC negotiation for Firefox and other portal clients.
+
+Build and install the native, reversible four-module kernel override:
 
 ```bash
 ./cameras/kernel/build-module.sh
@@ -120,9 +128,26 @@ sudo ./cameras/kernel/install.sh \
 sudo reboot
 ```
 
+Then build and install the matched `libcamera` and signed IPA packages. They
+contain the autofocus, resolution and WebRTC fixes and must be installed
+together:
+
+```bash
+cd cameras/libcamera
+makepkg --cleanbuild --noconfirm
+sudo pacman -U ./libcamera-0.7.2-3.6-x86_64.pkg.tar.zst \
+  ./libcamera-ipa-0.7.2-3.6-x86_64.pkg.tar.zst
+systemctl --user restart wireplumber
+```
+
+No second reboot is required for the userspace packages. Firefox must have
+`media.webrtc.camera.allow-pipewire` set to `true`; websites choose their own
+capture resolution, and the GNOME Camera application may not display a manual
+resolution selector even though the modes are exposed.
+
 The front sensor is detected but does not yet have a mainline Linux driver.
 See [cameras/README.md](cameras/README.md) for the verified hardware findings,
-libcamera packages, status checks and current limitation.
+dependencies, status checks, rollback instructions and current limitation.
 
 ## Supported family
 
