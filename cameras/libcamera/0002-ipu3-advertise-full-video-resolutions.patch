@@ -1,0 +1,47 @@
+diff --git a/src/libcamera/pipeline/ipu3/ipu3.cpp b/src/libcamera/pipeline/ipu3/ipu3.cpp
+index 0f3e169d3..9a2508756 100644
+--- a/src/libcamera/pipeline/ipu3/ipu3.cpp
++++ b/src/libcamera/pipeline/ipu3/ipu3.cpp
+@@ -443,16 +443,38 @@ PipelineHandlerIPU3::generateConfiguration(Camera *camera, Span<const StreamRole
+ 		case StreamRole::Viewfinder:
+ 		case StreamRole::VideoRecording: {
+ 			/*
+-			 * Default viewfinder and videorecording to 1280x720,
+-			 * capped to the maximum sensor resolution and aligned
+-			 * to the ImgU output constraints.
++			 * Default viewfinder and video recording to 1280x720. Advertise
++			 * larger modes as discrete, validated sizes: exposing one large
++			 * continuous range lets clients negotiate intermediate modes for
++			 * which the ImgU pipe calculation has no valid scaling factors.
+ 			 */
+ 			size = sensorResolution.boundedTo(kViewfinderSize)
+ 					       .alignedDownTo(ImgUDevice::kOutputAlignWidth,
+ 							      ImgUDevice::kOutputAlignHeight);
+ 			pixelFormat = formats::NV12;
+ 			bufferCount = IPU3CameraConfiguration::kBufferCount;
+-			streamFormats[pixelFormat] = { { ImgUDevice::kOutputMinSize, size } };
++			streamFormats[pixelFormat] = {
++				SizeRange({ 160, 120 }),
++				SizeRange({ 240, 160 }),
++				SizeRange({ 320, 240 }),
++				SizeRange({ 400, 240 }),
++				SizeRange({ 480, 320 }),
++				SizeRange({ 640, 360 }),
++				SizeRange({ 640, 480 }),
++				SizeRange({ 720, 480 }),
++				SizeRange({ 720, 576 }),
++				SizeRange({ 768, 480 }),
++				SizeRange({ 800, 600 }),
++				SizeRange({ 854, 480 }),
++				SizeRange({ 960, 540 }),
++				SizeRange({ 960, 640 }),
++				SizeRange({ 1024, 576 }),
++				SizeRange({ 1024, 600 }),
++				SizeRange({ 1280, 720 }),
++				SizeRange({ 1920, 1080 }),
++				SizeRange({ 2560, 1440 }),
++				SizeRange({ 3840, 2160 }),
++			};
+ 
+ 			break;
+ 		}

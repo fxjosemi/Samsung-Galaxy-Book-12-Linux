@@ -10,13 +10,17 @@ case "${1:-audio-userspace}" in
     brightness)
         exec "$SCRIPT_DIR/brightness/install.sh"
         ;;
+    camera-rear)
+        module="${2:-$SCRIPT_DIR/cameras/kernel/build/$(uname -r)/imx258.ko}"
+        exec "$SCRIPT_DIR/cameras/kernel/install.sh" "$module"
+        ;;
     help|--help|-h)
-        printf 'Usage: sudo ./install.sh [audio-userspace|brightness]\n'
-        printf 'Native audio: build and use kernel/install-native.sh instead.\n'
+        printf 'Usage: sudo ./install.sh [audio-userspace|brightness|camera-rear]\n'
+        printf 'Build native audio/camera modules before installing them.\n'
         ;;
     *)
         printf 'Unknown component: %s\n' "$1" >&2
-        printf 'Usage: sudo ./install.sh [audio-userspace|brightness]\n' >&2
+        printf 'Usage: sudo ./install.sh [audio-userspace|brightness|camera-rear]\n' >&2
         exit 2
         ;;
 esac

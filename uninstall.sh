@@ -10,12 +10,15 @@ case "${1:-audio-userspace}" in
     brightness)
         exec "$SCRIPT_DIR/brightness/uninstall.sh"
         ;;
+    camera-rear)
+        exec "$SCRIPT_DIR/cameras/kernel/uninstall.sh"
+        ;;
     help|--help|-h)
-        printf 'Usage: sudo ./uninstall.sh [audio-userspace|brightness]\n'
+        printf 'Usage: sudo ./uninstall.sh [audio-userspace|brightness|camera-rear]\n'
         ;;
     *)
         printf 'Unknown component: %s\n' "$1" >&2
-        printf 'Usage: sudo ./uninstall.sh [audio-userspace|brightness]\n' >&2
+        printf 'Usage: sudo ./uninstall.sh [audio-userspace|brightness|camera-rear]\n' >&2
         exit 2
         ;;
 esac

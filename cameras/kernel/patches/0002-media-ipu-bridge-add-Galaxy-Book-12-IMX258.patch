@@ -1,0 +1,19 @@
+From: Galaxy Book 12 Linux contributors
+Subject: [PATCH] media: ipu-bridge: add Galaxy Book 12 IMX258
+
+The Samsung Galaxy Book 12 exposes its rear Sony IMX258 as SONY258A.
+Without an entry in ipu_supported_sensors, ipu-bridge does not attach the
+software-node graph and imx258 probe fails with "Endpoint node not found".
+
+The patched IMX258 driver provides the established 633.6 and 320 MHz link
+frequency menu for the tablet's 26 MHz reference clock.
+
+--- a/drivers/media/pci/intel/ipu-bridge.c
++++ b/drivers/media/pci/intel/ipu-bridge.c
+@@ -97,6 +97,8 @@ static const struct ipu_sensor_config ipu_supported_sensors[] = {
+ 	IPU_SENSOR_CONFIG("OVTI8856", 3, 180000000, 360000000, 720000000),
++	/* Sony IMX258 (Samsung Galaxy Book 12) */
++	IPU_SENSOR_CONFIG("SONY258A", 2, 633600000, 320000000),
+ 	/* Sony IMX471 */
+ 	IPU_SENSOR_CONFIG("SONY471A", 1, 200000000),
+ 	/* Toshiba T4KA3 */

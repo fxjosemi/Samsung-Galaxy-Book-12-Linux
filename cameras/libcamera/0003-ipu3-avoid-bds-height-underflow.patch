@@ -1,0 +1,15 @@
+diff --git a/src/libcamera/pipeline/ipu3/imgu.cpp b/src/libcamera/pipeline/ipu3/imgu.cpp
+index bb36c06e8..ca3acf077 100644
+--- a/src/libcamera/pipeline/ipu3/imgu.cpp
++++ b/src/libcamera/pipeline/ipu3/imgu.cpp
+@@ -108,7 +108,9 @@ bool isSameRatio(const Size &in, const Size &out)
+ void calculateBDSHeight(ImgUDevice::Pipe *pipe, const Size &iif, const Size &gdc,
+ 			unsigned int bdsWidth, float bdsSF)
+ {
+-	unsigned int minIFHeight = iif.height - ImgUDevice::kIFMaxCropHeight;
++	unsigned int minIFHeight = iif.height > ImgUDevice::kIFMaxCropHeight
++					   ? iif.height - ImgUDevice::kIFMaxCropHeight
++					   : 0;
+ 	unsigned int minBDSHeight = gdc.height + ImgUDevice::kFilterHeight * 2;
+ 	unsigned int ifHeight;
+ 	float bdsHeight;

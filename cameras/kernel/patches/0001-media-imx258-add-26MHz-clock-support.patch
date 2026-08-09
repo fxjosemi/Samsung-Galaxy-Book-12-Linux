@@ -1,0 +1,140 @@
+From: Galaxy Book 12 Linux contributors
+Subject: [PATCH] media: i2c: imx258: add 26 MHz input-clock support
+
+The Samsung Galaxy Book 12 supplies 26 MHz to its rear IMX258 sensor.
+The sensor accepts 6--27 MHz, but the upstream driver only contains PLL
+tables for 19.2 and 24 MHz and rejects the device during probe.
+
+Add PLL settings which keep the established 1267 and 640 Mbps link rates.
+The divisors and multipliers follow the sensor PLL equations:
+
+  26 / 4 * 195 = 1267.5 MHz
+  26 / 5 * 123 =  639.6 MHz
+
+The output PLL uses 26 / 5 * 399 = 2074.8 MHz, within 0.06% of the
+2073.6 MHz produced by the existing 19.2 MHz table.
+
+--- a/drivers/media/i2c/imx258.c
++++ b/drivers/media/i2c/imx258.c
+@@ -316,6 +316,74 @@ static const struct cci_reg_sequence mipi_642mbps_24mhz_4l[] = {
+ 	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_L, 0 },
+ };
+ 
++static const struct cci_reg_sequence mipi_1267mbps_26mhz_2l[] = {
++	{ IMX258_REG_EXCK_FREQ, 0x1a00 },
++	{ IMX258_REG_IVTPXCK_DIV, 10 },
++	{ IMX258_REG_IVTSYCK_DIV, 2 },
++	{ IMX258_REG_PREPLLCK_VT_DIV, 4 },
++	{ IMX258_REG_PLL_IVT_MPY, 195 },
++	{ IMX258_REG_IOPPXCK_DIV, 10 },
++	{ IMX258_REG_IOPSYCK_DIV, 1 },
++	{ IMX258_REG_PREPLLCK_OP_DIV, 5 },
++	{ IMX258_REG_PLL_IOP_MPY, 399 },
++	{ IMX258_REG_PLL_MULT_DRIV, 0 },
++
++	{ IMX258_REG_CSI_LANE_MODE, 1 },
++	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 1267 * 2 },
++	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_L, 0 },
++};
++
++static const struct cci_reg_sequence mipi_1267mbps_26mhz_4l[] = {
++	{ IMX258_REG_EXCK_FREQ, 0x1a00 },
++	{ IMX258_REG_IVTPXCK_DIV, 5 },
++	{ IMX258_REG_IVTSYCK_DIV, 2 },
++	{ IMX258_REG_PREPLLCK_VT_DIV, 4 },
++	{ IMX258_REG_PLL_IVT_MPY, 195 },
++	{ IMX258_REG_IOPPXCK_DIV, 10 },
++	{ IMX258_REG_IOPSYCK_DIV, 1 },
++	{ IMX258_REG_PREPLLCK_OP_DIV, 5 },
++	{ IMX258_REG_PLL_IOP_MPY, 399 },
++	{ IMX258_REG_PLL_MULT_DRIV, 0 },
++
++	{ IMX258_REG_CSI_LANE_MODE, 3 },
++	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 1267 * 4 },
++	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_L, 0 },
++};
++
++static const struct cci_reg_sequence mipi_640mbps_26mhz_2l[] = {
++	{ IMX258_REG_EXCK_FREQ, 0x1a00 },
++	{ IMX258_REG_IVTPXCK_DIV, 5 },
++	{ IMX258_REG_IVTSYCK_DIV, 2 },
++	{ IMX258_REG_PREPLLCK_VT_DIV, 5 },
++	{ IMX258_REG_PLL_IVT_MPY, 123 },
++	{ IMX258_REG_IOPPXCK_DIV, 10 },
++	{ IMX258_REG_IOPSYCK_DIV, 1 },
++	{ IMX258_REG_PREPLLCK_OP_DIV, 5 },
++	{ IMX258_REG_PLL_IOP_MPY, 399 },
++	{ IMX258_REG_PLL_MULT_DRIV, 0 },
++
++	{ IMX258_REG_CSI_LANE_MODE, 1 },
++	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 640 * 2 },
++	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_L, 0 },
++};
++
++static const struct cci_reg_sequence mipi_640mbps_26mhz_4l[] = {
++	{ IMX258_REG_EXCK_FREQ, 0x1a00 },
++	{ IMX258_REG_IVTPXCK_DIV, 5 },
++	{ IMX258_REG_IVTSYCK_DIV, 2 },
++	{ IMX258_REG_PREPLLCK_VT_DIV, 5 },
++	{ IMX258_REG_PLL_IVT_MPY, 123 },
++	{ IMX258_REG_IOPPXCK_DIV, 10 },
++	{ IMX258_REG_IOPSYCK_DIV, 1 },
++	{ IMX258_REG_PREPLLCK_OP_DIV, 5 },
++	{ IMX258_REG_PLL_IOP_MPY, 399 },
++	{ IMX258_REG_PLL_MULT_DRIV, 0 },
++
++	{ IMX258_REG_CSI_LANE_MODE, 3 },
++	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 640 * 4 },
++	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_L, 0 },
++};
++
+ static const struct cci_reg_sequence mode_common_regs[] = {
+ 	{ CCI_REG8(0x3051), 0x00 },
+ 	{ CCI_REG8(0x6B11), 0xCF },
+@@ -591,6 +659,35 @@ static const struct imx258_link_freq_config link_freq_configs_24[] = {
+ 	},
+ };
+ 
++static const struct imx258_link_freq_config link_freq_configs_26[] = {
++	[IMX258_LINK_FREQ_1267MBPS] = {
++		.pixels_per_line = IMX258_PPL_DEFAULT,
++		.link_cfg = {
++			[IMX258_2_LANE_MODE] = {
++				.lf_to_pix_rate_factor = 2 * 2,
++				.reg_list = REGS(mipi_1267mbps_26mhz_2l),
++			},
++			[IMX258_4_LANE_MODE] = {
++				.lf_to_pix_rate_factor = 4,
++				.reg_list = REGS(mipi_1267mbps_26mhz_4l),
++			},
++		}
++	},
++	[IMX258_LINK_FREQ_640MBPS] = {
++		.pixels_per_line = IMX258_PPL_DEFAULT,
++		.link_cfg = {
++			[IMX258_2_LANE_MODE] = {
++				.lf_to_pix_rate_factor = 2,
++				.reg_list = REGS(mipi_640mbps_26mhz_2l),
++			},
++			[IMX258_4_LANE_MODE] = {
++				.lf_to_pix_rate_factor = 4,
++				.reg_list = REGS(mipi_640mbps_26mhz_4l),
++			},
++		}
++	},
++};
++
+ /* Mode configs */
+ static const struct imx258_mode supported_modes[] = {
+ 	{
+@@ -1404,6 +1501,10 @@ static int imx258_probe(struct i2c_client *client)
+ 		imx258->link_freq_configs = link_freq_configs_24;
+ 		imx258->link_freq_menu_items = link_freq_menu_items_24;
+ 		break;
++	case 26000000:
++		imx258->link_freq_configs = link_freq_configs_26;
++		imx258->link_freq_menu_items = link_freq_menu_items_19_2;
++		break;
+ 	default:
+ 		dev_err(imx258->dev, "input clock frequency of %u not supported\n",
+ 			val);

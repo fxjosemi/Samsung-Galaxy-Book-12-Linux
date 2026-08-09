@@ -1,0 +1,138 @@
+# Maintainer: Galaxy Book 12 Linux project
+
+pkgbase=libcamera
+pkgname=(libcamera libcamera-ipa)
+pkgver=0.7.2
+pkgrel=3.6
+pkgdesc="A complex camera support library for Linux, patched for Galaxy Book 12 autofocus"
+arch=(x86_64)
+url="https://libcamera.org/"
+license=(
+  Apache-2.0
+  CC0-1.0
+  'GPL-2.0-only WITH Linux-syscall-note'
+  GPL-2.0-or-later
+  LGPL-2.1-or-later
+)
+makedepends=(
+  git
+  gnutls
+  libdrm
+  libelf
+  libunwind
+  libyaml
+  libyuv
+  meson
+  python-jinja
+  python-ply
+  python-yaml
+  systemd
+)
+source=(
+  "git+https://git.libcamera.org/libcamera/libcamera.git#tag=v$pkgver"
+  0001-ipu3-stabilize-autofocus.patch
+  0002-ipu3-advertise-full-video-resolutions.patch
+  0003-ipu3-avoid-bds-height-underflow.patch
+)
+sha256sums=(
+  SKIP
+  e23b07b733942840ad624754a443b04f58285ca180759a5b7651153f279fe2f7
+  aa3410357a9589842d97964e3977aeb317ec3911028601510412f4abf564413e
+  7b76f432956331cfd4403e1a0a1a8c4be0cbddba6bf737e77e336de99c01b69e
+)
+
+_pick() {
+  local package="$1" file destination
+  shift
+  for file; do
+    destination="$srcdir/$package/${file#$pkgdir/}"
+    mkdir -p "$(dirname "$destination")"
+    mv "$file" "$destination"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$file")"
+  done
+}
+
+prepare() {
+  patch -d libcamera -Np1 -i "$srcdir/0001-ipu3-stabilize-autofocus.patch"
+  patch -d libcamera -Np1 -i "$srcdir/0002-ipu3-advertise-full-video-resolutions.patch"
+  patch -d libcamera -Np1 -i "$srcdir/0003-ipu3-avoid-bds-height-underflow.patch"
+}
+
+build() {
+  local meson_options=(
+    -D cam=disabled
+    -D cpp_args=-Wno-error=array-bounds
+    -D documentation=disabled
+    -D gstreamer=disabled
+    -D ipas=ipu3,simple,vimc
+    -D lc-compliance=disabled
+    -D pipelines=ipu3,simple,uvcvideo,virtual,vimc
+    -D pycamera=disabled
+    -D qcam=disabled
+    -D test=false
+    -D tracing=disabled
+    -D v4l2=enabled
+  )
+
+  meson setup libcamera build \
+    --prefix=/usr \
+    --libdir=lib \
+    --libexecdir=lib \
+    --buildtype=plain \
+    "${meson_options[@]}"
+  meson compile -C build
+}
+
+package_libcamera() {
+  depends=(
+    glibc
+    gnutls
+    libcamera-ipa
+    libelf
+    libgcc
+    libstdc++
+    libunwind
+    libyaml
+    libyuv
+    sh
+    systemd-libs
+  )
+  optdepends=(
+    'gst-plugin-libcamera: GStreamer plugin'
+    'libcamera-tools: camera utilities'
+  )
+  provides=(libcamera.so libcamera-base.so)
+
+  meson install -C build --destdir "$pkgdir"
+
+  (
+    cd "$pkgdir"
+    _pick libcamera-ipa usr/lib/libcamera
+    _pick discard usr/bin/libcamera-bug-report
+  )
+
+  install -Dm644 libcamera/LICENSES/BSD-3-Clause.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -Dm644 libcamera/LICENSES/Linux-syscall-note.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -Dm644 libcamera/LICENSES/MIT.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_libcamera-ipa() {
+  pkgdesc+=" - signed IPA modules"
+  depends=(
+    glibc
+    libcamera
+    libgcc
+    libstdc++
+  )
+  options=(!strip)
+
+  strip "$pkgname"/usr/lib/libcamera/*{.so,proxy}
+  for module in "$pkgname"/usr/lib/libcamera/*.so; do
+    libcamera/src/ipa/ipa-sign.sh \
+      "$(find build -type f -name '*ipa-priv-key.pem' -print -quit)" \
+      "$module" "$module.sign"
+  done
+
+  mv "$pkgname"/* "$pkgdir"
+  install -Dm644 libcamera/LICENSES/BSD-2-Clause.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+}

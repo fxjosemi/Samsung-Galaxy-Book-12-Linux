@@ -1,0 +1,369 @@
+diff --git a/src/ipa/ipu3/algorithms/af.cpp b/src/ipa/ipu3/algorithms/af.cpp
+index cf68fb59c..2c30337d8 100644
+--- a/src/ipa/ipu3/algorithms/af.cpp
++++ b/src/ipa/ipu3/algorithms/af.cpp
+@@ -66,14 +66,26 @@ LOG_DEFINE_CATEGORY(IPU3Af)
+ static constexpr uint32_t kMaxFocusSteps = 1023;
+ 
+ /* Minimum focus step for searching appropriate focus */
+-static constexpr uint32_t kCoarseSearchStep = 30;
+-static constexpr uint32_t kFineSearchStep = 1;
++static constexpr uint32_t kCoarseSearchStep = 32;
++static constexpr uint32_t kFineSearchStep = 8;
++
++/* Start in the useful middle range and expand only after hitting an edge. */
++static constexpr uint32_t kInitialFocus = 512;
++static constexpr uint32_t kInitialHalfRange = 256;
++static constexpr uint32_t kRefocusHalfRange = 160;
++
++/* Confirm a real peak instead of reacting to a single noisy statistic. */
++static constexpr uint32_t kPeakDeclineSamples = 3;
++static constexpr double kPeakDrop = 0.25;
++
++/* Require a persistent loss of contrast before starting a new full scan. */
++static constexpr uint32_t kOutOfFocusSamples = 15;
+ 
+ /* Max ratio of variance change, 0.0 < kMaxChange < 1.0 */
+ static constexpr double kMaxChange = 0.5;
+ 
+ /* The numbers of frame to be ignored, before performing focus scan. */
+-static constexpr uint32_t kIgnoreFrame = 10;
++static constexpr uint32_t kIgnoreFrame = 3;
+ 
+ /* Fine scan range 0 < kFineRange < 1 */
+ static constexpr double kFineRange = 0.05;
+@@ -105,8 +117,10 @@ static struct ipu3_uapi_af_filter_config afFilterConfigDefault = {
+  * image.
+  */
+ Af::Af()
+-	: focus_(0), bestFocus_(0), currentVariance_(0.0), previousVariance_(0.0),
+-	  coarseCompleted_(false), fineCompleted_(false)
++	: focus_(0), bestFocus_(0), currentVariance_(0.0), ignoreCounter_(0),
++	  outOfFocusCounter_(0), declineCounter_(0), previousVariance_(0.0),
++	  maxStep_(0), scanMin_(0), scanExpanded_(false),
++	  stableBaselineReady_(false), coarseCompleted_(false), fineCompleted_(false)
+ {
+ }
+ 
+@@ -162,18 +176,10 @@ int Af::configure(IPAContext &context, const IPAConfigInfo &configInfo)
+ 	grid.y_start = utils::alignDown(start.y, 2);
+ 	grid.y_start |= IPU3_UAPI_GRID_Y_START_EN;
+ 
+-	/* Initial max focus step */
+-	maxStep_ = kMaxFocusSteps;
+-
+-	/* Initial frame ignore counter */
+-	afIgnoreFrameReset();
+-
+-	/* Initial focus value */
+-	context.activeState.af.focus = 0;
+-	/* Maximum variance of the AF statistics */
+-	context.activeState.af.maxVariance = 0;
+ 	/* The stable AF value flag. if it is true, the AF should be in a stable state. */
+ 	context.activeState.af.stable = false;
++	stableBaselineReady_ = false;
++	afStartCoarseScan(context, kInitialFocus, kInitialHalfRange);
+ 
+ 	return 0;
+ }
+@@ -209,15 +215,47 @@ void Af::afCoarseScan(IPAContext &context)
+ 	if (afNeedIgnoreFrame())
+ 		return;
+ 
+-	if (afScan(context, kCoarseSearchStep)) {
++	if (afScan(context, kCoarseSearchStep, true)) {
++		const uint32_t coarseFocus = context.activeState.af.focus;
++
++		/*
++		 * A peak at a local-window edge may lie outside that window. Scan
++		 * only the missing side, retaining the best statistic already seen.
++		 */
++		if (!scanExpanded_ &&
++		    coarseFocus <= scanMin_ + kCoarseSearchStep && scanMin_ > 0) {
++			maxStep_ = scanMin_;
++			scanMin_ = 0;
++			focus_ = 0;
++			context.activeState.af.focus = focus_;
++			declineCounter_ = 0;
++			scanExpanded_ = true;
++			afIgnoreFrameReset();
++			return;
++		}
++
++		if (!scanExpanded_ &&
++		    coarseFocus + kCoarseSearchStep >= maxStep_ &&
++		    maxStep_ < kMaxFocusSteps) {
++			focus_ = std::min(maxStep_ + kCoarseSearchStep, kMaxFocusSteps);
++			scanMin_ = focus_;
++			maxStep_ = kMaxFocusSteps;
++			context.activeState.af.focus = focus_;
++			declineCounter_ = 0;
++			scanExpanded_ = true;
++			afIgnoreFrameReset();
++			return;
++		}
++
+ 		coarseCompleted_ = true;
+ 		context.activeState.af.maxVariance = 0;
+-		focus_ = context.activeState.af.focus -
+-			 (context.activeState.af.focus * kFineRange);
++		const uint32_t fineRange = std::max(static_cast<uint32_t>(coarseFocus * kFineRange),
++						    kCoarseSearchStep);
++		focus_ = coarseFocus > fineRange ? coarseFocus - fineRange : 0;
+ 		context.activeState.af.focus = focus_;
+ 		previousVariance_ = 0;
+-		maxStep_ = std::clamp(focus_ + static_cast<uint32_t>((focus_ * kFineRange)),
+-				      0U, kMaxFocusSteps);
++		maxStep_ = std::min(coarseFocus + fineRange, kMaxFocusSteps);
++		afIgnoreFrameReset();
+ 	}
+ }
+ 
+@@ -235,7 +273,7 @@ void Af::afFineScan(IPAContext &context)
+ 	if (afNeedIgnoreFrame())
+ 		return;
+ 
+-	if (afScan(context, kFineSearchStep)) {
++	if (afScan(context, kFineSearchStep, false)) {
+ 		context.activeState.af.stable = true;
+ 		fineCompleted_ = true;
+ 	}
+@@ -252,21 +290,41 @@ void Af::afReset(IPAContext &context)
+ 	if (afNeedIgnoreFrame())
+ 		return;
+ 
+-	context.activeState.af.maxVariance = 0;
+-	context.activeState.af.focus = 0;
+-	focus_ = 0;
++	const uint32_t previousFocus = context.activeState.af.focus;
+ 	context.activeState.af.stable = false;
+-	ignoreCounter_ = kIgnoreFrame;
+ 	previousVariance_ = 0.0;
++	outOfFocusCounter_ = 0;
+ 	coarseCompleted_ = false;
+ 	fineCompleted_ = false;
+-	maxStep_ = kMaxFocusSteps;
++	stableBaselineReady_ = false;
++	afStartCoarseScan(context, previousFocus, kRefocusHalfRange);
++}
++
++/**
++ * \brief Start a bounded coarse scan around a likely focus position
++ * \param[in] context The IPA context
++ * \param[in] centre Centre of the local search window
++ * \param[in] halfRange Distance searched on each side of \a centre
++ */
++void Af::afStartCoarseScan(IPAContext &context, uint32_t centre,
++			   uint32_t halfRange)
++{
++	scanMin_ = centre > halfRange ? centre - halfRange : 0;
++	maxStep_ = std::min(centre + halfRange, kMaxFocusSteps);
++	focus_ = scanMin_;
++	bestFocus_ = focus_;
++	declineCounter_ = 0;
++	scanExpanded_ = false;
++	context.activeState.af.focus = focus_;
++	context.activeState.af.maxVariance = 0;
++	afIgnoreFrameReset();
+ }
+ 
+ /**
+  * \brief AF variance comparison
+  * \param[in] context The IPA context
+- * \param[in] min_step The VCM movement step
++ * \param[in] step The VCM movement step
++ * \param[in] stopAfterPeak Stop after confirming a sustained contrast decline
+  *
+  * We always pick the largest variance to replace the previous one. The image
+  * with a larger variance also indicates it is a clearer image than previous
+@@ -274,42 +332,34 @@ void Af::afReset(IPAContext &context)
+  *
+  * \return True, if it finds a AF value.
+  */
+-bool Af::afScan(IPAContext &context, int min_step)
++bool Af::afScan(IPAContext &context, uint32_t step, bool stopAfterPeak)
+ {
+-	if (focus_ > maxStep_) {
+-		/* If reach the max step, move lens to the position. */
++	/* Keep the global maximum; local contrast peaks are common on real scenes. */
++	if (currentVariance_ > context.activeState.af.maxVariance) {
++		bestFocus_ = focus_;
++		context.activeState.af.maxVariance = currentVariance_;
++		declineCounter_ = 0;
++	} else if (stopAfterPeak &&
++		   currentVariance_ < context.activeState.af.maxVariance * (1.0 - kPeakDrop)) {
++		declineCounter_++;
++	} else {
++		declineCounter_ = 0;
++	}
++
++	const bool peakConfirmed = stopAfterPeak &&
++		declineCounter_ >= kPeakDeclineSamples &&
++		focus_ >= bestFocus_ + kPeakDeclineSamples * step;
++
++	if (peakConfirmed || focus_ >= maxStep_ || step > maxStep_ - focus_) {
+ 		context.activeState.af.focus = bestFocus_;
++		afIgnoreFrameReset();
+ 		return true;
+-	} else {
+-		/*
+-		 * Find the maximum of the variance by estimating its
+-		 * derivative. If the direction changes, it means we have
+-		 * passed a maximum one step before.
+-		 */
+-		if ((currentVariance_ - context.activeState.af.maxVariance) >=
+-		    -(context.activeState.af.maxVariance * 0.1)) {
+-			/*
+-			 * Positive and zero derivative:
+-			 * The variance is still increasing. The focus could be
+-			 * increased for the next comparison. Also, the max variance
+-			 * and previous focus value are updated.
+-			 */
+-			bestFocus_ = focus_;
+-			focus_ += min_step;
+-			context.activeState.af.focus = focus_;
+-			context.activeState.af.maxVariance = currentVariance_;
+-		} else {
+-			/*
+-			 * Negative derivative:
+-			 * The variance starts to decrease which means the maximum
+-			 * variance is found. Set focus step to previous good one
+-			 * then return immediately.
+-			 */
+-			context.activeState.af.focus = bestFocus_;
+-			return true;
+-		}
+ 	}
+ 
++	focus_ += step;
++	context.activeState.af.focus = focus_;
++	afIgnoreFrameReset();
++
+ 	previousVariance_ = currentVariance_;
+ 	LOG(IPU3Af, Debug) << " Previous step is "
+ 			   << bestFocus_
+@@ -385,6 +435,9 @@ double Af::afEstimateVariance(Span<const y_table_item_t> y_items, bool isY1)
+  */
+ bool Af::afIsOutOfFocus(IPAContext &context)
+ {
++	if (context.activeState.af.maxVariance <= 0.0)
++		return true;
++
+ 	const uint32_t diff_var = std::abs(currentVariance_ -
+ 					   context.activeState.af.maxVariance);
+ 	const double var_ratio = diff_var / context.activeState.af.maxVariance;
+@@ -444,10 +497,32 @@ void Af::process(IPAContext &context, [[maybe_unused]] const uint32_t frame,
+ 		afCoarseScan(context);
+ 		afFineScan(context);
+ 	} else {
+-		if (afIsOutOfFocus(context))
+-			afReset(context);
+-		else
+-			afIgnoreFrameReset();
++		/*
++		 * The scan's maximum belongs to an earlier frame. Wait for the
++		 * final lens move to propagate through the pipeline and measure a
++		 * fresh reference at the position where the lens actually stopped.
++		 */
++		if (!stableBaselineReady_) {
++			if (afNeedIgnoreFrame())
++				return;
++
++			context.activeState.af.maxVariance = currentVariance_;
++			outOfFocusCounter_ = 0;
++			stableBaselineReady_ = true;
++			return;
++		}
++
++		if (currentVariance_ > context.activeState.af.maxVariance)
++			context.activeState.af.maxVariance = currentVariance_;
++
++		if (afIsOutOfFocus(context)) {
++			if (++outOfFocusCounter_ >= kOutOfFocusSamples) {
++				ignoreCounter_ = 0;
++				afReset(context);
++			}
++		} else {
++			outOfFocusCounter_ = 0;
++		}
+ 	}
+ }
+ 
+diff --git a/src/ipa/ipu3/algorithms/af.h b/src/ipa/ipu3/algorithms/af.h
+index 68126d463..f97f8702e 100644
+--- a/src/ipa/ipu3/algorithms/af.h
++++ b/src/ipa/ipu3/algorithms/af.h
+@@ -42,7 +42,9 @@ public:
+ private:
+ 	void afCoarseScan(IPAContext &context);
+ 	void afFineScan(IPAContext &context);
+-	bool afScan(IPAContext &context, int min_step);
++	bool afScan(IPAContext &context, uint32_t step, bool stopAfterPeak);
++	void afStartCoarseScan(IPAContext &context, uint32_t centre,
++			       uint32_t halfRange);
+ 	void afReset(IPAContext &context);
+ 	bool afNeedIgnoreFrame();
+ 	void afIgnoreFrameReset();
+@@ -58,10 +60,20 @@ private:
+ 	double currentVariance_;
+ 	/* The frames are ignore before starting measuring. */
+ 	uint32_t ignoreCounter_;
++	/* Consecutive out-of-focus samples seen while focus is stable. */
++	uint32_t outOfFocusCounter_;
++	/* Consecutive samples sufficiently below the best contrast. */
++	uint32_t declineCounter_;
+ 	/* It is used to determine the derivative during scanning */
+ 	double previousVariance_;
+ 	/* The designated maximum range of focus scanning. */
+ 	uint32_t maxStep_;
++	/* Lower boundary of the current coarse scan. */
++	uint32_t scanMin_;
++	/* A boundary hit has already expanded this coarse scan. */
++	bool scanExpanded_;
++	/* The stable contrast reference was measured after the final lens move. */
++	bool stableBaselineReady_;
+ 	/* If the coarse scan completes, it is set to true. */
+ 	bool coarseCompleted_;
+ 	/* If the fine scan completes, it is set to true. */
+diff --git a/src/ipa/ipu3/ipu3.cpp b/src/ipa/ipu3/ipu3.cpp
+index 4bdc4b767..bcd0237fa 100644
+--- a/src/ipa/ipu3/ipu3.cpp
++++ b/src/ipa/ipu3/ipu3.cpp
+@@ -11,6 +11,7 @@
+ #include <limits>
+ #include <map>
+ #include <memory>
++#include <optional>
+ #include <stdint.h>
+ #include <utility>
+ #include <vector>
+@@ -177,6 +178,7 @@ private:
+ 
+ 	ControlInfoMap sensorCtrls_;
+ 	ControlInfoMap lensCtrls_;
++	std::optional<int32_t> lastFocus_;
+ 
+ 	IPACameraSensorInfo sensorInfo_;
+ 
+@@ -468,6 +470,7 @@ int IPAIPU3::configure(const IPAConfigInfo &configInfo,
+ 	sensorInfo_ = configInfo.sensorInfo;
+ 
+ 	lensCtrls_ = configInfo.lensControls;
++	lastFocus_.reset();
+ 
+ 	/* Clear the IPA context for the new streaming session. */
+ 	context_.activeState = {};
+@@ -650,8 +653,11 @@ void IPAIPU3::setControls(unsigned int frame)
+ 	ctrls.set(V4L2_CID_ANALOGUE_GAIN, gain);
+ 
+ 	ControlList lensCtrls(lensCtrls_);
+-	lensCtrls.set(V4L2_CID_FOCUS_ABSOLUTE,
+-		      static_cast<int32_t>(context_.activeState.af.focus));
++	const int32_t focus = static_cast<int32_t>(context_.activeState.af.focus);
++	if (!lastFocus_ || *lastFocus_ != focus) {
++		lensCtrls.set(V4L2_CID_FOCUS_ABSOLUTE, focus);
++		lastFocus_ = focus;
++	}
+ 
+ 	setSensorControls.emit(frame, ctrls, lensCtrls);
+ }

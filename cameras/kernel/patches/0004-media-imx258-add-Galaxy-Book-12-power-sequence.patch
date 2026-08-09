@@ -1,0 +1,166 @@
+From 88e882047f73fa9bbdc7c917a0673bd4914ad002 Mon Sep 17 00:00:00 2001
+From: Galaxy Book 12 Linux project <local@galaxybook12>
+Date: Sat, 8 Aug 2026 08:06:00 +0200
+Subject: [PATCH] media: imx258: add Galaxy Book 12 power sequence
+
+The Galaxy Book 12 needs a Samsung-specific control-logic _DSM call around
+the normal IMX258 rail sequence. It also exposes real reset and autofocus
+power GPIOs through INT3472, while the generic IMX258 driver only handles
+regulators and clock.
+
+Keep the workaround limited to the Galaxy Book 12 DMI identity and SONY258A
+ACPI sensor. Assert reset while power is off, enable the Samsung shared camera
+supply before the ordinary rails, power the actuator together with the sensor,
+and undo the sequence in reverse.
+---
+ drivers/media/i2c/imx258.c | 83 +++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 82 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/i2c/imx258.c b/drivers/media/i2c/imx258.c
+--- a/drivers/media/i2c/imx258.c
++++ b/drivers/media/i2c/imx258.c
+@@ -3,7 +3,9 @@
+ 
+ #include <linux/acpi.h>
+ #include <linux/clk.h>
++#include <linux/dmi.h>
+ #include <linux/delay.h>
++#include <linux/gpio/consumer.h>
+ #include <linux/i2c.h>
+ #include <linux/module.h>
+ #include <linux/pm_runtime.h>
+@@ -778,6 +780,9 @@
+ 
+ 	struct clk *clk;
+ 	struct regulator_bulk_data supplies[IMX258_NUM_SUPPLIES];
++	struct gpio_desc *reset_gpio;
++	struct gpio_desc *af_enable_gpio;
++	bool galaxy_book_12;
+ };
+ 
+ static inline struct imx258 *to_imx258(struct v4l2_subdev *_sd)
+@@ -1207,27 +1212,81 @@
+ 	return 0;
+ }
+ 
++static const guid_t galaxy_book_12_camera_on_guid =
++	GUID_INIT(0x952db6f5, 0xb3da, 0x473c,
++		  0x9a, 0x1b, 0x1d, 0xdb, 0xb2, 0x7d, 0xa9, 0xb4);
++static const guid_t galaxy_book_12_camera_off_guid =
++	GUID_INIT(0x239aba6f, 0x46f9, 0x4884,
++		  0xb6, 0x7c, 0x0b, 0x1d, 0x84, 0xdc, 0x58, 0x5c);
++
++static bool imx258_is_galaxy_book_12(struct device *dev)
++{
++	struct acpi_device *adev = ACPI_COMPANION(dev);
++
++	return adev && acpi_dev_hid_uid_match(adev, "SONY258A", NULL) &&
++		dmi_match(DMI_SYS_VENDOR, "SAMSUNG ELECTRONICS CO., LTD.") &&
++		dmi_match(DMI_PRODUCT_NAME, "Galaxy Book 12");
++}
++
++static int imx258_galaxy_book_12_set_power(struct device *dev, bool on)
++{
++	const guid_t *guid = on ? &galaxy_book_12_camera_on_guid :
++				  &galaxy_book_12_camera_off_guid;
++	union acpi_object *obj;
++	acpi_handle handle;
++	acpi_status status;
++
++	status = acpi_get_handle(NULL, "\\_SB.PCI0.DSC0", &handle);
++	if (ACPI_FAILURE(status))
++		return dev_err_probe(dev, -ENODEV,
++				     "cannot find Samsung camera control logic\n");
++
++	obj = acpi_evaluate_dsm(handle, guid, 0, 0, NULL);
++	if (!obj)
++		return dev_err_probe(dev, -EIO,
++				     "Samsung camera power _DSM failed\n");
++
++	ACPI_FREE(obj);
++	return 0;
++}
++
+ static int imx258_power_on(struct device *dev)
+ {
+ 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+ 	struct imx258 *imx258 = to_imx258(sd);
+ 	int ret;
+ 
++	if (imx258->galaxy_book_12) {
++		ret = imx258_galaxy_book_12_set_power(dev, true);
++		if (ret)
++			return ret;
++	}
++
+ 	ret = regulator_bulk_enable(IMX258_NUM_SUPPLIES,
+ 				    imx258->supplies);
+ 	if (ret) {
+ 		dev_err(dev, "%s: failed to enable regulators\n",
+ 			__func__);
++		if (imx258->galaxy_book_12)
++			imx258_galaxy_book_12_set_power(dev, false);
+ 		return ret;
+ 	}
+ 
++	gpiod_set_value_cansleep(imx258->af_enable_gpio, 1);
+ 	ret = clk_prepare_enable(imx258->clk);
+ 	if (ret) {
+ 		dev_err(dev, "failed to enable clock\n");
++		gpiod_set_value_cansleep(imx258->af_enable_gpio, 0);
+ 		regulator_bulk_disable(IMX258_NUM_SUPPLIES, imx258->supplies);
++		if (imx258->galaxy_book_12)
++			imx258_galaxy_book_12_set_power(dev, false);
++		return ret;
+ 	}
+ 
+-	return ret;
++	gpiod_set_value_cansleep(imx258->reset_gpio, 0);
++	usleep_range(10000, 12000);
++
++	return 0;
+ }
+ 
+ static int imx258_power_off(struct device *dev)
+@@ -1235,8 +1294,12 @@
+ 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+ 	struct imx258 *imx258 = to_imx258(sd);
+ 
++	gpiod_set_value_cansleep(imx258->reset_gpio, 1);
+ 	clk_disable_unprepare(imx258->clk);
++	gpiod_set_value_cansleep(imx258->af_enable_gpio, 0);
+ 	regulator_bulk_disable(IMX258_NUM_SUPPLIES, imx258->supplies);
++	if (imx258->galaxy_book_12)
++		imx258_galaxy_book_12_set_power(dev, false);
+ 
+ 	return 0;
+ }
+@@ -1490,6 +1553,26 @@
+ 		return dev_err_probe(imx258->dev, PTR_ERR(imx258->clk),
+ 				     "error getting clock\n");
+ 
++	imx258->galaxy_book_12 = imx258_is_galaxy_book_12(imx258->dev);
++	imx258->reset_gpio = devm_gpiod_get_optional(imx258->dev, "reset",
++						     GPIOD_OUT_HIGH);
++	if (IS_ERR(imx258->reset_gpio))
++		return dev_err_probe(imx258->dev,
++				     PTR_ERR(imx258->reset_gpio),
++				     "failed to get reset GPIO\n");
++	if (imx258->galaxy_book_12 && !imx258->reset_gpio)
++		return dev_err_probe(imx258->dev, -ENODEV,
++				     "Galaxy Book 12 reset GPIO is missing\n");
++	imx258->af_enable_gpio = devm_gpiod_get_optional(imx258->dev,
++							"af-enable", GPIOD_OUT_LOW);
++	if (IS_ERR(imx258->af_enable_gpio))
++		return dev_err_probe(imx258->dev,
++				     PTR_ERR(imx258->af_enable_gpio),
++				     "failed to get autofocus power GPIO\n");
++	if (imx258->galaxy_book_12 && !imx258->af_enable_gpio)
++		return dev_err_probe(imx258->dev, -ENODEV,
++				     "Galaxy Book 12 autofocus power GPIO is missing\n");
++
+ 	val = clk_get_rate(imx258->clk);
+ 
+ 	switch (val) {
+-- 
+2.50.1

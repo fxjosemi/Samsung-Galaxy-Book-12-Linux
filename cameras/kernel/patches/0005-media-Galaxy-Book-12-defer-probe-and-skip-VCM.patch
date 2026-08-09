@@ -1,0 +1,60 @@
+From f7947bf12005814849880335fda9cb5d210d1005 Mon Sep 17 00:00:00 2001
+From: Galaxy Book 12 Linux project <local@galaxybook12>
+Date: Sat, 8 Aug 2026 08:10:00 +0200
+Subject: [PATCH] media: defer Galaxy Book 12 probe and wait for VCM PM
+
+The sensor may probe before ipu-bridge has installed its software-node
+endpoint.  Defer the SONY258A probe so the normal deferred-probe mechanism can
+retry it after CIO2 is ready.
+
+The bridge can also queue VCM instantiation before the sensor driver reaches
+pm_runtime_enable(). On a fast boot pm_runtime_get_sync() then returns
+-EACCES, and the one-shot work item never creates the actuator. Wait for the
+SONY258A sensor to enable runtime PM before resuming it.
+---
+ drivers/media/i2c/imx258.c              |  5 +++++
+ drivers/media/pci/intel/ipu-bridge.c    | 8 ++++++++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/drivers/media/i2c/imx258.c b/drivers/media/i2c/imx258.c
+--- a/drivers/media/i2c/imx258.c
++++ b/drivers/media/i2c/imx258.c
+@@ -1420,6 +1420,11 @@ static int imx258_probe(struct i2c_client *client)
+ 
+ 	endpoint = fwnode_graph_get_next_endpoint(dev_fwnode(imx258->dev), NULL);
+ 	if (!endpoint) {
++		if (ACPI_COMPANION(imx258->dev) &&
++		    acpi_dev_hid_uid_match(ACPI_COMPANION(imx258->dev),
++					   "SONY258A", NULL))
++			return dev_err_probe(imx258->dev, -EPROBE_DEFER,
++					     "waiting for IPU bridge endpoint\n");
+		dev_err(imx258->dev, "Endpoint node not found\n");
+		return -EINVAL;
+	}
+diff --git a/drivers/media/pci/intel/ipu-bridge.c b/drivers/media/pci/intel/ipu-bridge.c
+--- a/drivers/media/pci/intel/ipu-bridge.c
++++ b/drivers/media/pci/intel/ipu-bridge.c
+@@ -4,6 +4,7 @@
+ #include <linux/acpi.h>
+ #include <acpi/acpi_bus.h>
+ #include <linux/cleanup.h>
++#include <linux/delay.h>
+ #include <linux/device.h>
+ #include <linux/dmi.h>
+ #include <linux/i2c.h>
+@@ -593,6 +594,13 @@ static void ipu_bridge_instantiate_vcm_work(struct work_struct *work)
+ 	struct i2c_client *vcm_client;
+ 	bool put_fwnode = true;
+ 	int ret;
++	unsigned int retries = 100;
++
++	/* IMX258 may queue this work just before enabling runtime PM. */
++	if (acpi_dev_hid_uid_match(adev, "SONY258A", NULL)) {
++		while (!pm_runtime_enabled(data->sensor) && retries--)
++			msleep(10);
++	}
+ 
+ 	/*
+ 	 * The client may get probed before the device_link gets added below
+-- 
+2.50.1
