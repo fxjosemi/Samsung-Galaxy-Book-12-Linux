@@ -1,0 +1,146 @@
+{
+  "date": "2026-09-20",
+  "audio_driver": "6.0.1.8261",
+  "audio_inf": "oem29.inf",
+  "audio_section": "IntcAzAudModelMaxim",
+  "maxim_effect_enabled": 1,
+  "maxim_effect_position": 1,
+  "maxim_parameter_count": 226,
+  "files": [
+    {
+      "file": "IMX241_CM500RF05SW700_SKY.cpf",
+      "bytes": 192692,
+      "sha256": "98e92b5c837a769e9837543bab6d57228ba9fe5149f8b60a8fbc000956c57931"
+    },
+    {
+      "file": "IMX241_CM500RF05SW700_SKY_Video.cpf",
+      "bytes": 191388,
+      "sha256": "2b305ff3510dc73b114ccece7bc98813117d8efa6eff3d12ce719e2f57cec543"
+    },
+    {
+      "file": "IMX241_FN50FF469H_SKY.cpf",
+      "bytes": 166272,
+      "sha256": "990a4005e296addcd033ea1eeac3288b2585c00ef4e140979ad60b4a12b06702"
+    },
+    {
+      "file": "IMX241_NSMM4D5_SKY.cpf",
+      "bytes": 226876,
+      "sha256": "21d6948bc2a1582235f6f7c42d1a70591d0ab20977cbbdadf5d6b1b54ee725b7"
+    },
+    {
+      "file": "IMX241_NSMM4D5_SKY_Video.cpf",
+      "bytes": 221428,
+      "sha256": "d9e0bde2279a7de647a7154b1892e90ceae2c7e3e65ecfba8f4c1c6dfdf326e4"
+    },
+    {
+      "file": "IMX241_START2FRONT_SKY.cpf",
+      "bytes": 170860,
+      "sha256": "2687b5194b79e67f3dcedccd8462627a02cf8294d84afd7be3feea06626beb70"
+    },
+    {
+      "file": "IMX241_START2FRONT_SKY_Video.cpf",
+      "bytes": 171796,
+      "sha256": "bfc81d33ca77d382bd26e258d9a8e583d40df0a99fbf190907fb034b98f40d86"
+    },
+    {
+      "file": "IMX258_START2REAR_SKY.cpf",
+      "bytes": 318860,
+      "sha256": "018727405f2f30497ea15aa32fa1b005121a383a499364ca4794ce51ce658005"
+    },
+    {
+      "file": "IMX258_START2REAR_SKY_4KVideo.cpf",
+      "bytes": 316572,
+      "sha256": "3dcbe857200a808e73e86c7bb8c6f82662e0538e62a5d98632f87e6591165395"
+    },
+    {
+      "file": "IMX258_START2REAR_SKY_HD120fpsVideo.cpf",
+      "bytes": 320060,
+      "sha256": "ddad18b11a5802759531d7dbf8b4d5e01be8c02cdb7971aefa0b06648eeded63"
+    },
+    {
+      "file": "IMX258_START2REAR_SKY_Video.cpf",
+      "bytes": 318844,
+      "sha256": "a72f7c822b89eeeb5c9005fef361164c96cc8487b00b46373912f784df14e20d"
+    },
+    {
+      "file": "defaultCpff.aiqb",
+      "bytes": 65920,
+      "sha256": "59f4bcc7cd2504da530c118714be84d85fd32d2513a8e2eae68d793b6164852d"
+    },
+    {
+      "file": "IMX241_CM500RF05SW700_SKY_pipeCfg.bin",
+      "bytes": 1658416,
+      "sha256": "1b7c630437685cccfa75faf22bdfe0b4fbb194497cd0ba0345a8b197a8afb27b"
+    },
+    {
+      "file": "IMX241_FN50FF469H_SKY_pipeCfg.bin",
+      "bytes": 131248,
+      "sha256": "139dad4d7cea266560b31389436b5297bd769d5e8260517640c62e126f59dbc2"
+    },
+    {
+      "file": "IMX241_NSMM4D5_SKY_pipeCfg.bin",
+      "bytes": 1658416,
+      "sha256": "1b7c630437685cccfa75faf22bdfe0b4fbb194497cd0ba0345a8b197a8afb27b"
+    },
+    {
+      "file": "IMX241_START2FRONT_SKY_pipeCfg.bin",
+      "bytes": 1658416,
+      "sha256": "1b7c630437685cccfa75faf22bdfe0b4fbb194497cd0ba0345a8b197a8afb27b"
+    },
+    {
+      "file": "IMX258_START2REAR_SKY_pipeCfg.bin",
+      "bytes": 878104,
+      "sha256": "4e30326216ac02459e86015beb2893a04ac463f82da16c1752d524f281007a03"
+    },
+    {
+      "file": "bh1733als.cat",
+      "bytes": 10148,
+      "sha256": "6920c8447d65fe2c126646882b45994636e8004a6092ee6a1605a1b5e8fd14ff"
+    },
+    {
+      "file": "BH1733Als.dll",
+      "bytes": 59752,
+      "sha256": "d58a0a2567c633f2a6ec57b1766d118348ece9d1e8d7f9b473067f2d9b9eeadd"
+    },
+    {
+      "file": "BH1733Als.inf",
+      "bytes": 2992,
+      "sha256": "c122f5900db46d7f4035bbe2aaca77c77d9544655396f1cb1c6e9e70c5edba4e"
+    },
+    {
+      "file": "k2hhacc.cat",
+      "bytes": 10050,
+      "sha256": "be7fb3b5c1a2d56dc41dc7bbab0c72b6d13213086f0864d0c364c8ba0f757ffe"
+    },
+    {
+      "file": "K2HHAcc.dll",
+      "bytes": 64384,
+      "sha256": "2f3e1b7f0b4a17f861e61b31d5de021786888b9c3b17e8149b95252d1de209a1"
+    },
+    {
+      "file": "K2HHAcc.inf",
+      "bytes": 2535,
+      "sha256": "8fe5098063b7b1081cd76259cf0346f45add43b1e7a3aebf4245370267a9a618"
+    },
+    {
+      "file": "sx9310grip.cat",
+      "bytes": 10077,
+      "sha256": "d32cabcd848a8b4d55f73c242d6499e39835953a8414a6e20778932f1b7860db"
+    },
+    {
+      "file": "SX9310GRIP.dll",
+      "bytes": 73672,
+      "sha256": "5619e41e3a8d88dadb63ae47449551ab54a82ae1f734e1d945e41884ea910c34"
+    },
+    {
+      "file": "SX9310GRIP.inf",
+      "bytes": 2457,
+      "sha256": "54e36e782816a9046c71a429fd46aa95b506554eb116e041db76dc74de7ff92c"
+    },
+    {
+      "file": "oem29.inf",
+      "bytes": 152240,
+      "sha256": "e646f7530f32845512eba42f437c1c1e377ccd6ccd693f85bd65c7fe5e15c01f"
+    }
+  ]
+}
