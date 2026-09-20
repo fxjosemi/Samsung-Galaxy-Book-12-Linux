@@ -196,6 +196,15 @@ the same reboot as the kernel override. See
 [cameras/README.md](cameras/README.md) for the verified hardware findings,
 dependencies, status checks and rollback instructions.
 
+### Preferred performance mode (experimental research)
+
+The Windows Samsung performance preference has been traced to the tablet's
+`SAM0701` ACPI `SPRF` method. An opt-in diagnostic and temporary trial tool is
+available in [performance/README.md](performance/README.md). It checks the exact
+reviewed firmware and restores the previous preference after a trial. Linux
+thermal-policy integration and performance gains have not yet been validated;
+this component is not part of `install.sh all`.
+
 ## Supported family
 
 The fixes are expected to cover the SM-W720 Wi-Fi and SM-W727 LTE families,
