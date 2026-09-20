@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add an experimental Samsung performance-preference diagnostic and bounded
+  trial tool, based on the installed Windows SAFI driver and the tablet's DSDT.
+  Keep it outside automatic installation pending Linux thermal-policy validation.
+
 - Add `./install.sh all` to install every validated Galaxy Book 12 fix in one
   pass on CachyOS.
 - Add a Pacman hook that rebuilds enabled native modules for a newly updated
