@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix the kernel.org source URL in `kernel/build-module.sh` for `x.y.0` kernel
+  releases, which kernel.org names `linux-x.y.tar.xz`.
+- Build, install and remove `snd-hda-codec-realtek-lib.ko` alongside the ALC298
+  module when the build produces it.
+- Add notes for Ubuntu-based kernels, tested on Linux Mint 22.3.
+
 - Add `./install.sh all` to install every validated Galaxy Book 12 fix in one
   pass on CachyOS.
 - Add a Pacman hook that rebuilds enabled native modules for a newly updated

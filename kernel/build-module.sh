@@ -5,6 +5,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 KERNEL_RELEASE="${KERNEL_RELEASE:-$(uname -r)}"
 KERNEL_VERSION="${KERNEL_RELEASE%%-*}"
+# kernel.org names x.y.0 releases "linux-x.y.tar.xz", not "linux-x.y.0.tar.xz"
+if [[ "$KERNEL_VERSION" =~ ^[0-9]+\.[0-9]+\.0$ ]]; then
+    KERNEL_VERSION="${KERNEL_VERSION%.0}"
+fi
 HEADERS="/usr/lib/modules/$KERNEL_RELEASE/build"
 PATCH_FILE="$SCRIPT_DIR/patches/0001-sound-hda-realtek-galaxy-book12.patch"
 SOURCE_TREE="${1:-}"
@@ -76,6 +80,10 @@ make -C "$HEADERS" \
 output_dir="$SCRIPT_DIR/build/$KERNEL_RELEASE"
 output_module="$output_dir/snd-hda-codec-alc269.ko"
 mkdir -p "$output_dir"
+lib_module="$work_dir/sound/hda/codecs/realtek/snd-hda-codec-realtek-lib.ko"
+if [ -f "$lib_module" ]; then
+    install -m 644 "$lib_module" "$output_dir/snd-hda-codec-realtek-lib.ko"
+fi
 install -m 644 \
     "$work_dir/sound/hda/codecs/realtek/snd-hda-codec-alc269.ko" \
     "$output_module"

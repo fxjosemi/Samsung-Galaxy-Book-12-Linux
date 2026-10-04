@@ -7,6 +7,10 @@ KERNEL_RELEASE="${KERNEL_RELEASE:-$(uname -r)}"
 MODULE_SOURCE="${1:-}"
 MODULE_DIR="/usr/lib/modules/$KERNEL_RELEASE/updates/alc298-book12"
 MODULE_DEST="$MODULE_DIR/snd-hda-codec-alc269.ko"
+# Some kernels need the rebuilt realtek-lib module alongside alc269
+# (otherwise: "disagrees about version of symbol alc_get_hp_pin").
+LIB_SOURCE="$(dirname -- "$MODULE_SOURCE")/snd-hda-codec-realtek-lib.ko"
+LIB_DEST="$MODULE_DIR/snd-hda-codec-realtek-lib.ko"
 BACKUP_DIR="/var/lib/alc298-book12-native-backup"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -47,8 +51,23 @@ case "$module_vermagic" in
         ;;
 esac
 
+if [ -f "$LIB_SOURCE" ]; then
+    lib_vermagic="$(modinfo -F vermagic "$LIB_SOURCE")"
+    case "$lib_vermagic" in
+        "$KERNEL_RELEASE "*) ;;
+        *)
+            echo "ERROR: realtek-lib vermagic does not match $KERNEL_RELEASE" >&2
+            echo "       $lib_vermagic" >&2
+            exit 1
+            ;;
+    esac
+fi
+
 install -d -m 755 "$MODULE_DIR" "$BACKUP_DIR"
 install -m 644 "$MODULE_SOURCE" "$MODULE_DEST"
+if [ -f "$LIB_SOURCE" ]; then
+    install -m 644 "$LIB_SOURCE" "$LIB_DEST"
+fi
 
 # Do not let the older userspace workaround overwrite the native route.
 for old_path in \
@@ -70,6 +89,15 @@ selected="$(modinfo -k "$KERNEL_RELEASE" -n snd_hda_codec_alc269)"
 if [ "$(readlink -f "$selected")" != "$(readlink -f "$MODULE_DEST")" ]; then
     echo "ERROR: depmod selected an unexpected module: $selected" >&2
     exit 1
+fi
+
+if [ -f "$LIB_SOURCE" ]; then
+    selected_lib="$(modinfo -k "$KERNEL_RELEASE" -n snd_hda_codec_realtek_lib)"
+    if [ "$(readlink -f "$selected_lib")" != "$(readlink -f "$LIB_DEST")" ]; then
+        echo "ERROR: depmod selected an unexpected realtek-lib module: $selected_lib" >&2
+        exit 1
+    fi
+    echo "Native realtek-lib module installed: $LIB_DEST"
 fi
 
 echo "Native module installed: $MODULE_DEST"

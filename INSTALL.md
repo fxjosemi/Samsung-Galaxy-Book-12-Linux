@@ -41,6 +41,9 @@ sudo apt install build-essential clang llvm curl xz-utils \
   linux-headers-"$(uname -r)" kmod patch
 ```
 
+Ubuntu-based kernels modify `sound/hda`, so the vanilla kernel.org sources are not enough there.
+See [docs/ubuntu-mint.md](docs/ubuntu-mint.md) for the procedure tested on Linux Mint 22.3.
+
 ## 3. Build the module
 
 The simple form downloads the kernel.org source matching the base version of
@@ -72,12 +75,13 @@ sudo reboot
 ```
 
 The installer checks the hardware IDs and module version before changing
-anything. It installs the module under the current kernel's `updates`
+anything. It installs the module (and `snd-hda-codec-realtek-lib.ko`,
+when the build produced it) under the current kernel's `updates`
 directory and backs up the older userspace initializer if present.
 
 Unsigned external modules will not load when Secure Boot enforcement is
 enabled. Disable Secure Boot or sign the module with a key trusted by your
-system.
+system. [docs/ubuntu-mint.md](docs/ubuntu-mint.md) shows an example of signing with a Machine Owner Key.
 
 ## 5. Verify the installation
 

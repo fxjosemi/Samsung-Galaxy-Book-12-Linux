@@ -11,6 +11,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 rm -f "$MODULE_DIR/snd-hda-codec-alc269.ko"
+rm -f "$MODULE_DIR/snd-hda-codec-realtek-lib.ko"
 rmdir "$MODULE_DIR" 2>/dev/null || true
 
 for target in \
