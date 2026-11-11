@@ -80,7 +80,7 @@ static bool supported_dmi(void)
     return read_text(DMI_VENDOR_PATH, vendor, sizeof(vendor)) == 0 &&
            read_text(DMI_PRODUCT_PATH, product, sizeof(product)) == 0 &&
            strstr(vendor, "SAMSUNG ELECTRONICS") != NULL &&
-           strcmp(product, "Galaxy Book 12") == 0;
+           (strcmp(product, "Galaxy Book 12") == 0 || strcmp(product, "Galaxy Book 12 LTE") == 0);
 }
 
 static bool supported_edid(const char *connector)

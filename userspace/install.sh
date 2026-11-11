@@ -2,7 +2,7 @@
 set -euo pipefail
 
 VENDOR_EXPECTED="SAMSUNG ELECTRONICS CO., LTD."
-PRODUCT_EXPECTED="Galaxy Book 12"
+PRODUCT_EXPECTED=("Galaxy Book 12" "Galaxy Book 12 LTE")
 CODEC_VENDOR_EXPECTED="0x10ec0298"
 CODEC_SUBSYSTEM_EXPECTED="0x144dc14f"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,7 +14,7 @@ fi
 
 vendor="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"
 product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
-if [ "$vendor" != "$VENDOR_EXPECTED" ] || [ "$product" != "$PRODUCT_EXPECTED" ]; then
+if [ "$vendor" != "$VENDOR_EXPECTED" ] || ([ "$product" != "${PRODUCT_EXPECTED[0]}" ] && [ "$product" != "${PRODUCT_EXPECTED[1]}" ]); then
     echo "ERROR: equipo no compatible: vendor='$vendor', product='$product'" >&2
     exit 1
 fi

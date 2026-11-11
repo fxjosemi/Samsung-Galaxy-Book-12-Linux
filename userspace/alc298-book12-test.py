@@ -19,7 +19,7 @@ import time
 
 VENDOR_ID = "0x10ec0298"
 SUBSYSTEM_ID = "0x144dc14f"
-PRODUCT_NAME = "Galaxy Book 12"
+PRODUCT_NAME = ["Galaxy Book 12", "Galaxy Book 12 LTE"]
 
 AMP_LEFT = (
     (0x0B, 0x00), (0x0C, 0x00), (0x0D, 0x00), (0x1A, 0x00),
@@ -89,9 +89,9 @@ def find_codec(force=False):
             matches.append(node)
     if not matches:
         raise SystemExit(f"No se encontró ALC298 {VENDOR_ID}/{SUBSYSTEM_ID}")
-    if product != PRODUCT_NAME and not force:
+    if product != PRODUCT_NAME[0] and product != PRODUCT_NAME[1] and not force:
         raise SystemExit(
-            f"DMI inesperado: {product!r}; se esperaba {PRODUCT_NAME!r}. "
+            f"DMI inesperado: {product!r}; se esperaba {' o '.join(PRODUCT_NAME)}. "
             "Use --force solo después de verificar la placa."
         )
     return Path("/dev/snd") / matches[0].name, product
